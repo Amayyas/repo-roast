@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "repo-roast"
+version = "0.1.0"
+description = "Read a GitHub profile through the GitHub API, then roast its coding habits."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = [
+    "PyGithub>=2.3",
+    "openai>=1.40",
+    "typer>=0.12",
+    "rich>=13.7",
+    "python-dotenv>=1.0",
+]
+
+[project.scripts]
+repo-roast = "repo_roast.cli:main"
+
+[tool.setuptools]
+# src layout: importing repo_roast always resolves to the installed package,
+# never to the working directory.
+package-dir = { "" = "src" }
+packages = ["repo_roast"]
