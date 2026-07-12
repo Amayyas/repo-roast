@@ -1,5 +1,9 @@
 # repo-roast
 
+[![CI](https://github.com/Amayyas/repo-roast/actions/workflows/ci.yml/badge.svg)](https://github.com/Amayyas/repo-roast/actions/workflows/ci.yml)
+[![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue)](https://www.python.org)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+
 A terminal CLI that reads a GitHub profile through the **GitHub REST API** —
 repos, language breakdown, stars, abandoned projects, and a sample of recent
 commit messages — then asks an LLM to roast the developer's coding habits.
