@@ -13,6 +13,7 @@ from rich.markup import escape
 from rich.panel import Panel
 from rich.table import Table
 
+from . import __version__
 from .errors import GitHubAuthError, LLMAuthError, RepoRoastError
 from .github_client import gather_stats
 from .roast import (
@@ -34,6 +35,12 @@ app = typer.Typer(
     help="Roast a GitHub user's coding habits, with receipts.",
 )
 console = Console()
+
+
+def _version_callback(value: bool) -> None:
+    if value:
+        typer.echo(__version__)
+        raise typer.Exit()
 
 
 class Spice(str, Enum):
@@ -75,6 +82,10 @@ def _evidence_table(stats: ProfileStats) -> Table:
 
 @app.command()
 def roast(
+    version: bool = typer.Option(
+        False, "--version", callback=_version_callback, is_eager=True,
+        help="Show the version and exit."
+    ),
     username: str = typer.Argument(
         None,
         help="GitHub user to roast. Omit to roast the authenticated user.",
@@ -87,6 +98,9 @@ def roast(
     ),
     repos: int = typer.Option(
         5, "--repos", "-r", help="Recent repos to sample commit messages from."
+    ),
+    commits: int = typer.Option(
+        8, "--commits", "-c", min=1, help="Commits to sample per repository."
     ),
     evidence: bool = typer.Option(
         True, "--evidence/--no-evidence", help="Show the stats table."
@@ -125,7 +139,12 @@ def roast(
     target = f"@{username}" if username else "you"
     try:
         with console.status(f"[cyan]Reading {target} from the GitHub API..."):
-            stats = gather_stats(github_token, username, repos_sampled=repos)
+            stats = gather_stats(
+                github_token,
+                username,
+                repos_sampled=repos,
+                commits_per_repo=commits,
+            )
     except RepoRoastError as exc:
         _fail(exc)
 
