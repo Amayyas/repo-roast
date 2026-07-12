@@ -7,7 +7,7 @@ from enum import Enum
 from typing import NoReturn
 
 import typer
-from dotenv import load_dotenv
+from dotenv import find_dotenv, load_dotenv
 from rich.console import Console
 from rich.markup import escape
 from rich.panel import Panel
@@ -24,7 +24,10 @@ from .roast import (
 )
 from .stats import ProfileStats
 
-load_dotenv()
+# usecwd is not optional: bare load_dotenv() searches upwards from *this file*,
+# which lives in site-packages once the package is properly installed -- so it
+# would never find the .env sitting in the directory the user actually ran from.
+load_dotenv(find_dotenv(usecwd=True))
 
 app = typer.Typer(
     add_completion=False,
