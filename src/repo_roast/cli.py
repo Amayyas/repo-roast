@@ -105,8 +105,9 @@ def roast(
         )
 
     # The LLM key is only needed on the path that actually calls the LLM, so
-    # --dry-run stays usable with nothing but a GitHub token.
-    llm_api_key = os.getenv("LLM_API_KEY")
+    # --dry-run stays usable with nothing but a GitHub token. It stays a str
+    # rather than str | None: --dry-run returns long before it is ever read.
+    llm_api_key = os.getenv("LLM_API_KEY", "")
     if not llm_api_key and not dry_run:
         _fail(
             LLMAuthError(
