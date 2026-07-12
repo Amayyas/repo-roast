@@ -19,7 +19,10 @@ venv/
 env/
 ENV/
 
-# Tooling caches
+# Tooling caches and coverage output
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.coverage
+.coverage.*
+htmlcov/

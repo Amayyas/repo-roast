@@ -13,6 +13,7 @@ from github import (
     RateLimitExceededException,
     UnknownObjectException,
 )
+from github.Commit import Commit
 
 from .errors import GitHubAuthError, GitHubError, RateLimitError, UserNotFoundError
 from .stats import CommitSample, ProfileStats
@@ -140,11 +141,13 @@ def _gather(
     commit_samples: list[CommitSample] = []
     for repo in recent:
         try:
+            # Slicing a PaginatedList loses its element type, so state it.
+            commit: Commit
             for commit in repo.get_commits()[:commits_per_repo]:
                 # Check for emptiness before indexing: "".splitlines() is [], and
                 # the resulting IndexError would be caught below as "empty repo",
                 # silently abandoning the rest of this repo's commits.
-                message = commit.commit.message.strip()
+                message: str = commit.commit.message.strip()
                 if not message:
                     continue
                 first_line = message.splitlines()[0].strip()

@@ -1,0 +1,106 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A fresh push to a branch supersedes whatever was still running on it.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# Least privilege: nothing here needs to write to the repository. Pull requests
+# from forks get a read-only token and no access to secrets, which is what makes
+# it safe to run this on contributions from strangers.
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - run: pip install -e ".[dev]"
+      - run: ruff check src tests
+      - run: ruff format --check src tests
+
+  types:
+    name: types
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - run: pip install -e ".[dev]"
+      # tests/ joins in once #6 ships the py.typed marker: without it, mypy
+      # cannot see this package's own annotations from the outside.
+      - run: mypy --strict src
+
+  test:
+    name: test (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - run: pip install -e ".[dev]"
+      # The suite is hermetic: no token, no key, no network. If a test ever
+      # reaches for a socket, conftest makes it fail rather than pass quietly.
+      - run: pytest --cov=repo_roast --cov-report=term-missing --cov-fail-under=90
+
+  smoke:
+    name: smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # A real, non-editable install: this is what proves the src layout, the
+      # packaging and the console_scripts entry point actually work for a user.
+      - run: pip install .
+      - run: repo-roast --help
+      - name: A missing GITHUB_TOKEN fails clearly
+        run: |
+          set +e
+          output=$(repo-roast torvalds --dry-run 2>&1)
+          status=$?
+          set -e
+          echo "$output"
+          [ "$status" -ne 0 ] || { echo "::error::expected a non-zero exit"; exit 1; }
+          echo "$output" | grep -q "GITHUB_TOKEN is not set" \
+            || { echo "::error::expected a clear message about GITHUB_TOKEN"; exit 1; }
+
+      # Regression guard. A bare load_dotenv() resolves .env relative to the
+      # module's own directory -- site-packages, once installed for real -- so it
+      # silently ignored the user's .env. Only a non-editable install shows this,
+      # which is exactly what this job is.
+      - name: The .env in the working directory is actually read
+        run: |
+          mkdir -p /tmp/userdir && cd /tmp/userdir
+          echo "GITHUB_TOKEN=ghp_definitely_not_a_real_token" > .env
+          set +e
+          output=$(repo-roast torvalds --dry-run 2>&1)
+          set -e
+          echo "$output"
+          echo "$output" | grep -q "GITHUB_TOKEN is not set" \
+            && { echo "::error::the .env in the working directory was ignored"; exit 1; }
+          echo "$output" | grep -q "rejected your GITHUB_TOKEN" \
+            || { echo "::error::expected the token from .env to be sent and refused"; exit 1; }
