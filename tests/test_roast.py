@@ -1,0 +1,138 @@
+"""Prompt construction, and the LLM call's failure modes."""
+
+from __future__ import annotations
+
+from collections.abc import Callable
+from typing import Any
+
+import openai
+import pytest
+
+from repo_roast.errors import LLMAuthError, LLMError, ModelNotFoundError
+from repo_roast.roast import (
+    DEFAULT_MODEL,
+    SPICE_LEVELS,
+    SYSTEM_PROMPT,
+    build_prompt,
+    generate_roast,
+)
+from repo_roast.stats import ProfileStats
+
+from .conftest import http_response
+
+Install = Callable[..., list[dict[str, Any]]]
+
+
+# --- the prompt -----------------------------------------------------------
+
+
+@pytest.mark.parametrize("spice", ["mild", "medium", "hot"])
+def test_each_spice_level_changes_the_tone(spice: str, stats: ProfileStats) -> None:
+    assert SPICE_LEVELS[spice] in build_prompt(stats, spice)
+
+
+def test_an_unknown_spice_falls_back_to_medium(stats: ProfileStats) -> None:
+    assert SPICE_LEVELS["medium"] in build_prompt(stats, "nuclear")
+
+
+def test_the_prompt_carries_the_evidence(stats: ProfileStats) -> None:
+    prompt = build_prompt(stats, "medium")
+
+    assert stats.as_prompt_block() in prompt
+    assert "fix: it works now" in prompt
+
+
+def test_the_system_prompt_forbids_inventing_and_going_personal() -> None:
+    """These two rules are the whole safety story — assert they never drift out."""
+    assert "Never invent" in SYSTEM_PROMPT
+    assert "protected characteristic" in SYSTEM_PROMPT
+
+
+# --- the call -------------------------------------------------------------
+
+
+def test_the_roast_is_returned_stripped(
+    install_llm: Install, stats: ProfileStats
+) -> None:
+    install_llm(content="  a roast with ragged edges  ")
+
+    assert generate_roast(stats, api_key="k") == "a roast with ragged edges"
+
+
+def test_an_empty_response_becomes_an_empty_string(
+    install_llm: Install, stats: ProfileStats
+) -> None:
+    install_llm(content=None)
+
+    assert generate_roast(stats, api_key="k") == ""
+
+
+def test_the_request_is_shaped_the_way_we_intend(
+    install_llm: Install, stats: ProfileStats
+) -> None:
+    calls = install_llm()
+    generate_roast(stats, api_key="k", spice="hot")
+
+    sent = calls[0]
+    assert sent["model"] == DEFAULT_MODEL
+    # High temperature: a roast needs personality, not a correct answer.
+    assert sent["temperature"] == 0.9
+    assert sent["messages"][0] == {"role": "system", "content": SYSTEM_PROMPT}
+    assert sent["messages"][1]["content"] == build_prompt(stats, "hot")
+
+
+# --- failure modes --------------------------------------------------------
+
+
+def test_a_rejected_key_is_reported_as_such(
+    install_llm: Install, stats: ProfileStats
+) -> None:
+    install_llm(
+        raises=openai.AuthenticationError(
+            "bad key", response=http_response(401), body=None
+        )
+    )
+    with pytest.raises(LLMAuthError) as caught:
+        generate_roast(stats, api_key="nope")
+
+    assert "LLM_API_KEY" in caught.value.message
+
+
+def test_a_retired_model_is_reported_as_such(
+    install_llm: Install, stats: ProfileStats
+) -> None:
+    """The likeliest failure in the wild: providers drop model names."""
+    install_llm(
+        raises=openai.NotFoundError(
+            "no such model", response=http_response(404), body=None
+        )
+    )
+    with pytest.raises(ModelNotFoundError) as caught:
+        generate_roast(stats, api_key="k", model="llama-from-2023")
+
+    assert "llama-from-2023" in caught.value.message
+    assert caught.value.hint
+
+
+def test_provider_rate_limiting_is_reported_as_such(
+    install_llm: Install, stats: ProfileStats
+) -> None:
+    install_llm(
+        raises=openai.RateLimitError("slow down", response=http_response(429), body=None)
+    )
+    with pytest.raises(LLMError):
+        generate_roast(stats, api_key="k")
+
+
+def test_an_unreachable_provider_is_reported_as_such(
+    install_llm: Install, stats: ProfileStats
+) -> None:
+    install_llm(
+        raises=openai.APIConnectionError(
+            request=http_response(500).request,
+        )
+    )
+    with pytest.raises(LLMError) as caught:
+        generate_roast(stats, api_key="k", base_url="https://typo.invalid/v1")
+
+    assert "typo.invalid" in caught.value.message
