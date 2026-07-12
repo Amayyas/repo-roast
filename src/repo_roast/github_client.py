@@ -141,7 +141,13 @@ def _gather(
     for repo in recent:
         try:
             for commit in repo.get_commits()[:commits_per_repo]:
-                first_line = commit.commit.message.strip().splitlines()[0].strip()
+                # Check for emptiness before indexing: "".splitlines() is [], and
+                # the resulting IndexError would be caught below as "empty repo",
+                # silently abandoning the rest of this repo's commits.
+                message = commit.commit.message.strip()
+                if not message:
+                    continue
+                first_line = message.splitlines()[0].strip()
                 if not first_line:
                     continue
                 commit_samples.append(
