@@ -9,6 +9,14 @@ description = "Read a GitHub profile through the GitHub API, then roast its codi
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
+keywords = ["github", "cli", "developer-tools", "roast"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Typing :: Typed",
+]
 dependencies = [
     "PyGithub>=2.3",
     "openai>=1.40",
@@ -27,6 +35,11 @@ dev = [
 
 [project.scripts]
 repo-roast = "repo_roast.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/Amayyas/repo-roast"
+Issues = "https://github.com/Amayyas/repo-roast/issues"
+Source = "https://github.com/Amayyas/repo-roast"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -64,3 +77,6 @@ extend-immutable-calls = ["typer.Option", "typer.Argument"]
 # never to the working directory.
 package-dir = { "" = "src" }
 packages = ["repo_roast"]
+
+[tool.setuptools.package-data]
+repo_roast = ["py.typed"]
