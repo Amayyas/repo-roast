@@ -9,6 +9,8 @@ from repo_roast import cli
 from repo_roast.errors import RateLimitError, UserNotFoundError
 from repo_roast.stats import ProfileStats
 
+from .conftest import plain
+
 runner = CliRunner()
 
 
@@ -21,7 +23,7 @@ def test_help_renders() -> None:
     result = runner.invoke(cli.app, ["--help"])
 
     assert result.exit_code == 0
-    assert "--dry-run" in result.output
+    assert "--dry-run" in plain(result.output)
 
 
 def test_a_missing_github_token_fails_clearly(
@@ -31,7 +33,7 @@ def test_a_missing_github_token_fails_clearly(
     result = runner.invoke(cli.app, ["torvalds"])
 
     assert result.exit_code == 1
-    assert "GITHUB_TOKEN is not set" in result.output
+    assert "GITHUB_TOKEN is not set" in plain(result.output)
 
 
 def test_a_missing_llm_key_fails_clearly(
@@ -41,7 +43,7 @@ def test_a_missing_llm_key_fails_clearly(
     result = runner.invoke(cli.app, ["torvalds"])
 
     assert result.exit_code == 1
-    assert "LLM_API_KEY is not set" in result.output
+    assert "LLM_API_KEY is not set" in plain(result.output)
 
 
 def test_dry_run_needs_no_llm_key(
@@ -52,8 +54,8 @@ def test_dry_run_needs_no_llm_key(
     result = runner.invoke(cli.app, ["torvalds", "--dry-run"])
 
     assert result.exit_code == 0
-    assert "Prompt that would be sent" in result.output
-    assert "fix: it works now" in result.output  # the evidence reached the prompt
+    assert "Prompt that would be sent" in plain(result.output)
+    assert "fix: it works now" in plain(result.output)  # the evidence reached the prompt
 
 
 def test_dry_run_never_calls_the_llm(
@@ -79,7 +81,7 @@ def test_the_roast_is_rendered(
     result = runner.invoke(cli.app, ["torvalds"])
 
     assert result.exit_code == 0
-    assert "You ship on Fridays." in result.output
+    assert "You ship on Fridays." in plain(result.output)
 
 
 def test_the_evidence_table_can_be_switched_off(
@@ -91,7 +93,7 @@ def test_the_evidence_table_can_be_switched_off(
 
     result = runner.invoke(cli.app, ["torvalds", "--no-evidence"])
 
-    assert "Evidence against" not in result.output
+    assert "Evidence against" not in plain(result.output)
 
 
 def test_a_github_failure_prints_the_message_and_the_hint(
@@ -109,8 +111,8 @@ def test_a_github_failure_prints_the_message_and_the_hint(
     result = runner.invoke(cli.app, ["ghost", "--dry-run"])
 
     assert result.exit_code == 1
-    assert "no user named 'ghost'" in result.output
-    assert "Check the spelling." in result.output
+    assert "no user named 'ghost'" in plain(result.output)
+    assert "Check the spelling." in plain(result.output)
 
 
 def test_an_llm_failure_exits_non_zero(
@@ -126,7 +128,7 @@ def test_an_llm_failure_exits_non_zero(
     result = runner.invoke(cli.app, ["torvalds"])
 
     assert result.exit_code == 1
-    assert "Quota gone." in result.output
+    assert "Quota gone." in plain(result.output)
 
 
 def test_the_model_flag_wins_over_the_environment(
@@ -136,4 +138,4 @@ def test_the_model_flag_wins_over_the_environment(
     monkeypatch.setenv("LLM_MODEL", "from-env")
     result = runner.invoke(cli.app, ["torvalds", "--dry-run", "--model", "from-flag"])
 
-    assert "from-flag" in result.output
+    assert "from-flag" in plain(result.output)

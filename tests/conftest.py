@@ -6,6 +6,7 @@ with fakes, so the suite runs with no token, no key, and no rate limit.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable, Iterator
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
@@ -20,6 +21,19 @@ from repo_roast.stats import CommitSample, ProfileStats
 NOW = datetime.now(timezone.utc)
 
 ENV_VARS = ("GITHUB_TOKEN", "LLM_API_KEY", "LLM_BASE_URL", "LLM_MODEL")
+
+_ANSI = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def plain(output: str) -> str:
+    """Strip the terminal styling before asserting on CLI output.
+
+    Rich styles *within* a token -- the '--' of a flag is coloured separately
+    from its name -- so a raw search for '--dry-run' finds nothing the moment
+    colour is on. Whether colour is on differs between a laptop and CI, which
+    is a difference no test should be able to see.
+    """
+    return _ANSI.sub("", output)
 
 
 @pytest.fixture(autouse=True)
