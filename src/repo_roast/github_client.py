@@ -5,8 +5,16 @@ from __future__ import annotations
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 
-from github import Auth, Github, GithubException
+from github import (
+    Auth,
+    BadCredentialsException,
+    Github,
+    GithubException,
+    RateLimitExceededException,
+    UnknownObjectException,
+)
 
+from .errors import GitHubAuthError, GitHubError, RateLimitError, UserNotFoundError
 from .stats import CommitSample, ProfileStats
 
 # A repo with no push in this long counts as abandoned.
@@ -29,6 +37,43 @@ def _as_utc(value: datetime | None) -> datetime | None:
     return value
 
 
+def _reset_at(exc: GithubException) -> datetime | None:
+    """The moment the GitHub quota refills, if the response says so."""
+    raw = (exc.headers or {}).get("x-ratelimit-reset")
+    try:
+        return datetime.fromtimestamp(int(raw), tz=timezone.utc)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+
+
+def _translate(exc: GithubException, username: str | None) -> GitHubError:
+    """Turn a PyGithub exception into something the user can act on."""
+    if isinstance(exc, RateLimitExceededException):
+        reset = _reset_at(exc)
+        when = f" It refills at {reset:%H:%M UTC}." if reset else ""
+        return RateLimitError(
+            f"GitHub's API rate limit is exhausted.{when}",
+            hint="Retry later, or lower --repos to sample fewer repositories.",
+            reset_at=reset,
+        )
+
+    if isinstance(exc, BadCredentialsException):
+        return GitHubAuthError(
+            "GitHub rejected your GITHUB_TOKEN.",
+            hint="It may have expired or been revoked. Issue a new one at "
+            "https://github.com/settings/tokens",
+        )
+
+    if isinstance(exc, UnknownObjectException):
+        who = f"'{username}'" if username else "the authenticated user"
+        return UserNotFoundError(
+            f"GitHub has no user named {who}.",
+            hint="Check the spelling — it is the login, not the display name.",
+        )
+
+    return GitHubError(f"GitHub API error (HTTP {exc.status}): {exc.data}")
+
+
 def gather_stats(
     token: str,
     username: str | None = None,
@@ -39,7 +84,21 @@ def gather_stats(
 
     When *username* is None we read the authenticated user, which lets the token
     surface private repos it can already see.
+
+    Raises a `GitHubError` subclass -- never a raw PyGithub exception.
     """
+    try:
+        return _gather(token, username, repos_sampled, commits_per_repo)
+    except GithubException as exc:
+        raise _translate(exc, username) from exc
+
+
+def _gather(
+    token: str,
+    username: str | None,
+    repos_sampled: int,
+    commits_per_repo: int,
+) -> ProfileStats:
     gh = Github(auth=Auth.Token(token))
     user = gh.get_user(username) if username else gh.get_user()
 
@@ -91,6 +150,10 @@ def gather_stats(
                         message=first_line[:MAX_COMMIT_MESSAGE_CHARS],
                     )
                 )
+        except RateLimitExceededException:
+            # Never mistake an exhausted quota for an empty repo: that would
+            # silently produce a roast with no commit evidence at all.
+            raise
         except (GithubException, IndexError):
             # Empty repo, or history we are not allowed to read: just skip it.
             continue

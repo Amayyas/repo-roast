@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import openai
 from openai import OpenAI
 
+from .errors import LLMAuthError, LLMError, ModelNotFoundError
 from .stats import ProfileStats
 
 # Groq is the default because it is free and OpenAI-compatible. Any other
@@ -61,18 +63,45 @@ def generate_roast(
     base_url: str = DEFAULT_BASE_URL,
     spice: str = "medium",
 ) -> str:
-    """Send the digest to the LLM and return the roast text."""
+    """Send the digest to the LLM and return the roast text.
+
+    Raises an `LLMError` subclass -- never a raw openai exception.
+    """
     client = OpenAI(api_key=api_key, base_url=base_url)
 
-    response = client.chat.completions.create(
-        model=model,
-        max_tokens=800,
-        # High temperature: a roast needs personality, not a correct answer.
-        temperature=0.9,
-        messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": build_prompt(stats, spice)},
-        ],
-    )
+    try:
+        response = client.chat.completions.create(
+            model=model,
+            max_tokens=800,
+            # High temperature: a roast needs personality, not a correct answer.
+            temperature=0.9,
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": build_prompt(stats, spice)},
+            ],
+        )
+    except openai.AuthenticationError as exc:
+        raise LLMAuthError(
+            f"{base_url} rejected your LLM_API_KEY.",
+            hint="Get a free Groq key at https://console.groq.com/ (starts with 'gsk_').",
+        ) from exc
+    except openai.NotFoundError as exc:
+        raise ModelNotFoundError(
+            f"{base_url} does not serve the model '{model}'.",
+            hint="Providers retire model names over time. Check their model list "
+            "and set LLM_MODEL, or pass --model.",
+        ) from exc
+    except openai.RateLimitError as exc:
+        raise LLMError(
+            "The LLM provider rate-limited the request.",
+            hint="Free tiers cap requests per minute. Wait a moment and retry.",
+        ) from exc
+    except openai.APIConnectionError as exc:
+        raise LLMError(
+            f"Could not reach {base_url}.",
+            hint="Check your connection, and that LLM_BASE_URL is correct.",
+        ) from exc
+    except openai.APIError as exc:
+        raise LLMError(f"The LLM provider failed: {exc}") from exc
 
     return (response.choices[0].message.content or "").strip()

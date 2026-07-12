@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from enum import Enum
+from typing import NoReturn
 
 import typer
 from dotenv import load_dotenv
@@ -12,6 +13,7 @@ from rich.markup import escape
 from rich.panel import Panel
 from rich.table import Table
 
+from .errors import GitHubAuthError, LLMAuthError, RepoRoastError
 from .github_client import gather_stats
 from .roast import (
     DEFAULT_BASE_URL,
@@ -35,6 +37,14 @@ class Spice(str, Enum):
     mild = "mild"
     medium = "medium"
     hot = "hot"
+
+
+def _fail(exc: RepoRoastError) -> NoReturn:
+    """Render an expected failure the way the user should read it, then exit."""
+    console.print(f"[bold red]Error:[/] {escape(exc.message)}")
+    if exc.hint:
+        console.print(f"[dim]{escape(exc.hint)}[/]")
+    raise typer.Exit(1)
 
 
 def _evidence_table(stats: ProfileStats) -> Table:
@@ -87,21 +97,23 @@ def roast(
     """Read a GitHub profile through the API and roast it."""
     github_token = os.getenv("GITHUB_TOKEN")
     if not github_token:
-        console.print(
-            "[bold red]GITHUB_TOKEN is not set.[/] "
-            "Copy .env.example to .env and add a GitHub personal access token."
+        _fail(
+            GitHubAuthError(
+                "GITHUB_TOKEN is not set.",
+                hint="Copy .env.example to .env and add a GitHub personal access token.",
+            )
         )
-        raise typer.Exit(1)
 
     # The LLM key is only needed on the path that actually calls the LLM, so
     # --dry-run stays usable with nothing but a GitHub token.
     llm_api_key = os.getenv("LLM_API_KEY")
     if not llm_api_key and not dry_run:
-        console.print(
-            "[bold red]LLM_API_KEY is not set.[/] "
-            "Get a free key at https://console.groq.com/, or use --dry-run."
+        _fail(
+            LLMAuthError(
+                "LLM_API_KEY is not set.",
+                hint="Get a free key at https://console.groq.com/, or use --dry-run.",
+            )
         )
-        raise typer.Exit(1)
 
     base_url = os.getenv("LLM_BASE_URL") or DEFAULT_BASE_URL
     chosen_model = model or os.getenv("LLM_MODEL") or DEFAULT_MODEL
@@ -110,9 +122,8 @@ def roast(
     try:
         with console.status(f"[cyan]Reading {target} from the GitHub API..."):
             stats = gather_stats(github_token, username, repos_sampled=repos)
-    except Exception as exc:
-        console.print(f"[bold red]GitHub API error:[/] {exc}")
-        raise typer.Exit(1) from exc
+    except RepoRoastError as exc:
+        _fail(exc)
 
     if evidence:
         console.print()
@@ -145,9 +156,8 @@ def roast(
                 base_url=base_url,
                 spice=spice.value,
             )
-    except Exception as exc:
-        console.print(f"[bold red]LLM error:[/] {exc}")
-        raise typer.Exit(1) from exc
+    except RepoRoastError as exc:
+        _fail(exc)
 
     console.print()
     console.print(
