@@ -9,8 +9,8 @@ __version__ = "0.1.0"
 __all__ = [
     "CommitSample",
     "ProfileStats",
+    "__version__",
     "build_prompt",
     "gather_stats",
     "generate_roast",
-    "__version__",
 ]

@@ -110,9 +110,9 @@ def roast(
     try:
         with console.status(f"[cyan]Reading {target} from the GitHub API..."):
             stats = gather_stats(github_token, username, repos_sampled=repos)
-    except Exception as exc:  # noqa: BLE001 - surface any API failure cleanly
+    except Exception as exc:
         console.print(f"[bold red]GitHub API error:[/] {exc}")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from exc
 
     if evidence:
         console.print()
@@ -145,9 +145,9 @@ def roast(
                 base_url=base_url,
                 spice=spice.value,
             )
-    except Exception as exc:  # noqa: BLE001 - surface any LLM failure cleanly
+    except Exception as exc:
         console.print(f"[bold red]LLM error:[/] {exc}")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from exc
 
     console.print()
     console.print(

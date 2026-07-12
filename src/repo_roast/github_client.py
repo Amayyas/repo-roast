@@ -16,6 +16,9 @@ ABANDONED_AFTER_DAYS = 365
 # commit body cannot blow up the prompt.
 MAX_COMMIT_MESSAGE_CHARS = 140
 
+# Sort key fallback: a repo with no push date sorts last, never crashes.
+_NEVER_PUSHED = datetime.min.replace(tzinfo=timezone.utc)
+
 
 def _as_utc(value: datetime | None) -> datetime | None:
     """Coerce naive datetimes to UTC so comparisons never raise."""
@@ -71,7 +74,7 @@ def gather_stats(
     # the N most recently pushed repos, and at most `commits_per_repo` each.
     recent = sorted(
         originals,
-        key=lambda repo: _as_utc(repo.pushed_at) or datetime.min.replace(tzinfo=timezone.utc),
+        key=lambda repo: _as_utc(repo.pushed_at) or _NEVER_PUSHED,
         reverse=True,
     )[:repos_sampled]
 

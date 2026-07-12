@@ -20,6 +20,30 @@ dependencies = [
 [project.scripts]
 repo-roast = "repo_roast.cli:main"
 
+[tool.ruff]
+# 90, not the default 88: the existing code already sits at this width, and a
+# reformat-the-world commit would bury every future diff.
+line-length = 90
+target-version = "py310"
+src = ["src"]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle
+    "F",    # pyflakes
+    "I",    # import sorting
+    "UP",   # pyupgrade
+    "B",    # bugbear
+    "SIM",  # simplify
+    "C4",   # comprehensions
+    "RUF",  # ruff-specific
+]
+
+[tool.ruff.lint.flake8-bugbear]
+# Typer's whole API is built on calls in argument defaults, which B008 forbids.
+# Whitelist those two rather than switching the rule off everywhere.
+extend-immutable-calls = ["typer.Option", "typer.Argument"]
+
 [tool.setuptools]
 # src layout: importing repo_roast always resolves to the installed package,
 # never to the working directory.
