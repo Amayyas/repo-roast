@@ -87,4 +87,4 @@ Questions, bugs, or a roast that missed? Reach out at
 
 ## License
 
-MIT
+[MIT](LICENSE) © Amayyas Aouadene
