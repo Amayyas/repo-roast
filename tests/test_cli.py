@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 from typer.testing import CliRunner
 
@@ -201,3 +203,95 @@ def test_bare_invocation_shows_the_help() -> None:
 
     assert "Commands" in plain(result.output)
     assert "roast" in plain(result.output)
+
+
+# --- machine-readable output ----------------------------------------------
+
+
+def test_json_dry_run_is_a_valid_document(
+    monkeypatch: pytest.MonkeyPatch, canned_github: None, stats: ProfileStats
+) -> None:
+    monkeypatch.setenv("GITHUB_TOKEN", "token")
+    result = runner.invoke(cli.app, ["roast", "torvalds", "--dry-run", "-f", "json"])
+
+    payload = json.loads(result.stdout)
+
+    assert result.exit_code == 0
+    assert payload["stats"]["login"] == stats.login
+    assert payload["stats"]["top_language"] == "Python"
+    assert payload["prompt"]["system"]
+    assert "fix: it works now" in payload["prompt"]["user"]
+
+
+def test_json_roast_carries_the_stats_and_the_roast(
+    monkeypatch: pytest.MonkeyPatch, canned_github: None
+) -> None:
+    monkeypatch.setenv("GITHUB_TOKEN", "token")
+    monkeypatch.setenv("LLM_API_KEY", "key")
+    monkeypatch.setattr(cli, "generate_roast", lambda *a, **k: "You ship on Fridays.")
+
+    result = runner.invoke(cli.app, ["roast", "torvalds", "-f", "json"])
+    payload = json.loads(result.stdout)
+
+    assert payload["roast"] == "You ship on Fridays."
+    assert payload["stats"]["total_stars"] == 4
+    assert payload["spice"] == "medium"
+
+
+def test_json_stdout_stays_clean_when_the_run_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A pipe must get valid JSON or nothing at all -- never half a document.
+
+    Diagnostics belong on stderr; this is what the stream split is for.
+    """
+    monkeypatch.setenv("GITHUB_TOKEN", "token")
+    monkeypatch.setenv("LLM_API_KEY", "key")
+
+    def _raise(*args: object, **kwargs: object) -> ProfileStats:
+        raise UserNotFoundError("No such user.", hint="Check the spelling.")
+
+    monkeypatch.setattr(cli, "gather_stats", _raise)
+    result = runner.invoke(cli.app, ["roast", "ghost", "-f", "json"])
+
+    assert result.exit_code == 1
+    assert result.stdout == ""
+    assert "No such user." in plain(result.stderr)
+
+
+def test_json_output_carries_no_rich_markup(
+    monkeypatch: pytest.MonkeyPatch, canned_github: None
+) -> None:
+    """Rich would wrap at the terminal width and corrupt the document."""
+    monkeypatch.setenv("GITHUB_TOKEN", "token")
+    result = runner.invoke(cli.app, ["roast", "torvalds", "--dry-run", "-f", "json"])
+
+    assert "\x1b[" not in result.stdout
+    assert "Evidence against" not in result.stdout  # no table leaked in
+
+
+def test_markdown_renders_a_table_and_the_roast(
+    monkeypatch: pytest.MonkeyPatch, canned_github: None
+) -> None:
+    monkeypatch.setenv("GITHUB_TOKEN", "token")
+    monkeypatch.setenv("LLM_API_KEY", "key")
+    monkeypatch.setattr(cli, "generate_roast", lambda *a, **k: "You ship on Fridays.")
+
+    result = runner.invoke(cli.app, ["roast", "torvalds", "-f", "markdown"])
+    output = plain(result.stdout)
+
+    assert "| Metric | Value |" in output
+    assert "## Roast of @amayyas" in output
+    assert "You ship on Fridays." in output
+
+
+def test_the_default_format_is_still_the_rich_panel(
+    monkeypatch: pytest.MonkeyPatch, canned_github: None
+) -> None:
+    monkeypatch.setenv("GITHUB_TOKEN", "token")
+    monkeypatch.setenv("LLM_API_KEY", "key")
+    monkeypatch.setattr(cli, "generate_roast", lambda *a, **k: "roasted")
+
+    result = runner.invoke(cli.app, ["roast", "torvalds"])
+
+    assert "Evidence against" in plain(result.output)

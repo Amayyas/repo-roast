@@ -65,10 +65,27 @@ Flags belong to `roast`. `--version` belongs to the top level.
 | `--repos` / `-r` | `5` | How many recently-pushed repos to sample commit messages from. |
 | `--commits` / `-c` | `8` | Commits to sample per repository (1–50). |
 | `--evidence` / `--no-evidence` | on | Show the stats table. |
+| `--format` / `-f` | `text` | `text`, `json`, or `markdown`. |
 | `--dry-run` | off | Gather stats, print the evidence table and the exact prompt, then exit — **no LLM call and no `LLM_API_KEY` required**. |
 | `--version` | off | Print the installed version and exit. |
 
 `--dry-run` is the quickest way to check the GitHub half on its own.
+
+### Scripting it
+
+`--format json` prints one document to stdout and nothing else:
+
+```bash
+repo-roast roast torvalds -f json | jq '.stats.total_stars'
+repo-roast roast torvalds -f json --dry-run | jq -r '.prompt.user'
+```
+
+Progress spinners and error messages go to **stderr**, so a pipe receives either
+a valid document or nothing at all — never half of one. Failures still exit
+non-zero, with the message on stderr where it belongs.
+
+`--format markdown` prints the evidence table and the roast as Markdown, ready to
+paste into an issue or a README.
 
 ## Provider
 
