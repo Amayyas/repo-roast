@@ -84,7 +84,7 @@ jobs:
       - name: A missing GITHUB_TOKEN fails clearly
         run: |
           set +e
-          output=$(repo-roast torvalds --dry-run 2>&1)
+          output=$(repo-roast roast torvalds --dry-run 2>&1)
           status=$?
           set -e
           echo "$output"
@@ -101,7 +101,7 @@ jobs:
           mkdir -p /tmp/userdir && cd /tmp/userdir
           echo "GITHUB_TOKEN=ghp_definitely_not_a_real_token" > .env
           set +e
-          output=$(repo-roast torvalds --dry-run 2>&1)
+          output=$(repo-roast roast torvalds --dry-run 2>&1)
           set -e
           echo "$output"
           echo "$output" | grep -q "GITHUB_TOKEN is not set" \
