@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import os
+import re
 from enum import Enum
-from typing import NoReturn
+from typing import Any, NoReturn
 
 import typer
 from dotenv import find_dotenv, load_dotenv
@@ -12,6 +13,7 @@ from rich.console import Console
 from rich.markup import escape
 from rich.panel import Panel
 from rich.table import Table
+from typer.core import TyperGroup
 
 from . import __version__
 from .errors import GitHubAuthError, LLMAuthError, RepoRoastError
@@ -30,8 +32,42 @@ from .stats import ProfileStats
 # would never find the .env sitting in the directory the user actually ran from.
 load_dotenv(find_dotenv(usecwd=True))
 
+# What GitHub allows in a login: alphanumerics and single inner hyphens, 39 max.
+_LOOKS_LIKE_A_LOGIN = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$")
+
+
+class _Group(TyperGroup):
+    """Catches the pre-0.2 invocation and points at the new one.
+
+    `repo-roast torvalds` used to work. With sub-commands it cannot: a bare
+    token is read as a command name, and nothing distinguishes a username from a
+    mistyped sub-command. Answering "No such command" would tell the user
+    nothing about what changed, so say what to type instead.
+    """
+
+    # ctx and the return value belong to the click Typer vendors privately, so
+    # they are typed Any rather than spelled out from a module we should not
+    # import.
+    def get_command(self, ctx: Any, name: str) -> Any:
+        command = super().get_command(ctx, name)
+
+        if command is None and _LOOKS_LIKE_A_LOGIN.match(name):
+            # ctx.fail raises the usage error of whichever click Typer is built
+            # on. Typer vendors its own copy under a private module, so naming
+            # the exception ourselves would be a bet on its internals.
+            ctx.fail(
+                f"No such command {name!r}.\n\n"
+                f"repo-roast takes a sub-command since 0.2.0. You probably want:\n"
+                f"    repo-roast roast {name}"
+            )
+
+        return command
+
+
 app = typer.Typer(
+    cls=_Group,
     add_completion=False,
+    no_args_is_help=True,
     help="Roast a GitHub user's coding habits, with receipts.",
 )
 console = Console()
@@ -41,6 +77,23 @@ def _version_callback(value: bool) -> None:
     if value:
         typer.echo(__version__)
         raise typer.Exit()
+
+
+@app.callback()
+def main_options(
+    version: bool = typer.Option(
+        False,
+        "--version",
+        callback=_version_callback,
+        is_eager=True,
+        help="Show the version and exit.",
+    ),
+) -> None:
+    """Registering a callback is also what keeps Typer in sub-command mode.
+
+    With a lone command and no callback, Typer promotes that command to the
+    top level -- which is exactly the collapse we are moving away from.
+    """
 
 
 class Spice(str, Enum):
@@ -82,13 +135,6 @@ def _evidence_table(stats: ProfileStats) -> Table:
 
 @app.command()
 def roast(
-    version: bool = typer.Option(
-        False,
-        "--version",
-        callback=_version_callback,
-        is_eager=True,
-        help="Show the version and exit.",
-    ),
     username: str = typer.Argument(
         None,
         help="GitHub user to roast. Omit to roast the authenticated user.",
