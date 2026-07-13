@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
 from enum import Enum
@@ -70,7 +71,11 @@ app = typer.Typer(
     no_args_is_help=True,
     help="Roast a GitHub user's coding habits, with receipts.",
 )
+# stdout carries the result; stderr carries everything the user reads but a pipe
+# should not. Without the split, a spinner frame or an error message would land
+# in the middle of a JSON document being redirected to a file.
 console = Console()
+err_console = Console(stderr=True)
 
 
 def _version_callback(value: bool) -> None:
@@ -102,11 +107,17 @@ class Spice(str, Enum):
     hot = "hot"
 
 
+class Format(str, Enum):
+    text = "text"
+    json = "json"
+    markdown = "markdown"
+
+
 def _fail(exc: RepoRoastError) -> NoReturn:
     """Render an expected failure the way the user should read it, then exit."""
-    console.print(f"[bold red]Error:[/] {escape(exc.message)}")
+    err_console.print(f"[bold red]Error:[/] {escape(exc.message)}")
     if exc.hint:
-        console.print(f"[dim]{escape(exc.hint)}[/]")
+        err_console.print(f"[dim]{escape(exc.hint)}[/]")
     raise typer.Exit(1)
 
 
@@ -131,6 +142,38 @@ def _evidence_table(stats: ProfileStats) -> Table:
     table.add_row("Commits sampled", str(len(stats.commit_samples)))
 
     return table
+
+
+def _emit_json(payload: dict[str, Any]) -> None:
+    """Write a JSON document to stdout, bypassing Rich entirely.
+
+    console.print() would wrap at the terminal width and apply markup, which
+    turns a valid document into garbage the moment it is piped.
+    """
+    typer.echo(json.dumps(payload, indent=2, ensure_ascii=False))
+
+
+def _markdown_evidence(stats: ProfileStats) -> str:
+    rows = [
+        ("Name", stats.name or "—"),
+        ("Account age", f"{stats.account_age_years:.1f} years"),
+        ("Repos owned", str(stats.total_owned)),
+        ("Originals / forks", f"{stats.originals} / {stats.forks}"),
+        ("Total stars", str(stats.total_stars)),
+        ("Top language", stats.top_language or "—"),
+        ("Abandoned (1y+ untouched)", str(stats.abandoned)),
+        ("No description", str(stats.no_description)),
+        ("No language detected", str(stats.no_language)),
+        ("Commits sampled", str(len(stats.commit_samples))),
+    ]
+    lines = [
+        f"## Evidence against @{stats.login}",
+        "",
+        "| Metric | Value |",
+        "| --- | --- |",
+        *(f"| {metric} | {value} |" for metric, value in rows),
+    ]
+    return "\n".join(lines)
 
 
 @app.command()
@@ -158,6 +201,9 @@ def roast(
     ),
     evidence: bool = typer.Option(
         True, "--evidence/--no-evidence", help="Show the stats table."
+    ),
+    fmt: Format = typer.Option(
+        Format.text, "--format", "-f", help="How to render the result."
     ),
     dry_run: bool = typer.Option(
         False,
@@ -192,7 +238,8 @@ def roast(
 
     target = f"@{username}" if username else "you"
     try:
-        with console.status(f"[cyan]Reading {target} from the GitHub API..."):
+        # The spinner goes to stderr: it is progress, not result.
+        with err_console.status(f"[cyan]Reading {target} from the GitHub API..."):
             stats = gather_stats(
                 github_token,
                 username,
@@ -202,21 +249,42 @@ def roast(
     except RepoRoastError as exc:
         _fail(exc)
 
-    if evidence:
+    if evidence and fmt is Format.text:
         console.print()
         console.print(_evidence_table(stats))
 
     if dry_run:
+        user_message = build_prompt(stats, spice.value)
+
+        if fmt is Format.json:
+            _emit_json(
+                {
+                    "stats": stats.to_dict(),
+                    "prompt": {"system": SYSTEM_PROMPT, "user": user_message},
+                    "model": chosen_model,
+                    "base_url": base_url,
+                    "spice": spice.value,
+                }
+            )
+            return
+
+        if fmt is Format.markdown:
+            blocks = [_markdown_evidence(stats)] if evidence else []
+            blocks += [
+                "## Prompt that would be sent",
+                f"`{chosen_model}` @ `{base_url}`",
+                f"```\nSYSTEM\n{SYSTEM_PROMPT}\n\nUSER\n{user_message}\n```",
+            ]
+            typer.echo("\n\n".join(blocks))
+            return
+
         # Escape the prompt: commit messages contain things like "[linux]" that
         # Rich would otherwise swallow as style markup.
-        prompt = (
-            f"[bold]SYSTEM[/]\n{escape(SYSTEM_PROMPT)}\n\n"
-            f"[bold]USER[/]\n{escape(build_prompt(stats, spice.value))}"
-        )
         console.print()
         console.print(
             Panel(
-                prompt,
+                f"[bold]SYSTEM[/]\n{escape(SYSTEM_PROMPT)}\n\n"
+                f"[bold]USER[/]\n{escape(user_message)}",
                 title="Prompt that would be sent",
                 subtitle=f"{chosen_model} @ {base_url}",
                 border_style="dim",
@@ -225,7 +293,7 @@ def roast(
         return
 
     try:
-        with console.status("[red]Preparing the roast..."):
+        with err_console.status("[red]Preparing the roast..."):
             text = generate_roast(
                 stats,
                 api_key=llm_api_key,
@@ -235,6 +303,23 @@ def roast(
             )
     except RepoRoastError as exc:
         _fail(exc)
+
+    if fmt is Format.json:
+        _emit_json(
+            {
+                "stats": stats.to_dict(),
+                "roast": text,
+                "model": chosen_model,
+                "spice": spice.value,
+            }
+        )
+        return
+
+    if fmt is Format.markdown:
+        blocks = [_markdown_evidence(stats)] if evidence else []
+        blocks += [f"## Roast of @{stats.login}", text]
+        typer.echo("\n\n".join(blocks))
+        return
 
     console.print()
     console.print(
