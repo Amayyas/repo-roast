@@ -16,6 +16,7 @@ from github import (
 from github.Commit import Commit
 
 from .errors import GitHubAuthError, GitHubError, RateLimitError, UserNotFoundError
+from .sanitize import scrub
 from .stats import CommitSample, ProfileStats
 
 # A repo with no push in this long counts as abandoned.
@@ -24,6 +25,11 @@ ABANDONED_AFTER_DAYS = 365
 # Commit messages are truncated to their first line, capped here, so a rogue
 # commit body cannot blow up the prompt.
 MAX_COMMIT_MESSAGE_CHARS = 140
+
+# The other two free-text fields a stranger controls. Both are bounded for the
+# same reason: nothing they write may dominate the prompt.
+MAX_REPO_NAME_CHARS = 100
+MAX_NAME_CHARS = 100
 
 # Sort key fallback: a repo with no push date sorts last, never crashes.
 _NEVER_PUSHED = datetime.min.replace(tzinfo=timezone.utc)
@@ -150,13 +156,17 @@ def _gather(
                 message: str = commit.commit.message.strip()
                 if not message:
                     continue
-                first_line = message.splitlines()[0].strip()
+                # Scrub at the boundary: this text was written by strangers and
+                # is headed for both an LLM prompt and the user's terminal.
+                first_line = scrub(
+                    message.splitlines()[0], limit=MAX_COMMIT_MESSAGE_CHARS
+                )
                 if not first_line:
                     continue
                 commit_samples.append(
                     CommitSample(
-                        repo=repo.name,
-                        message=first_line[:MAX_COMMIT_MESSAGE_CHARS],
+                        repo=scrub(repo.name, limit=MAX_REPO_NAME_CHARS),
+                        message=first_line,
                     )
                 )
         except RateLimitExceededException:
@@ -169,7 +179,8 @@ def _gather(
 
     return ProfileStats(
         login=login,
-        name=user.name,
+        # The display name is a free-text field the account holder controls.
+        name=scrub(user.name, limit=MAX_NAME_CHARS) if user.name else None,
         account_created=_as_utc(user.created_at) or datetime.now(timezone.utc),
         total_owned=len(repos),
         originals=len(originals),
