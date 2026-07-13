@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from typing import Any
 
 
 @dataclass
@@ -42,6 +43,35 @@ class ProfileStats:
     @property
     def top_language(self) -> str | None:
         return self.languages[0][0] if self.languages else None
+
+    def to_dict(self) -> dict[str, Any]:
+        """A JSON-ready view, for `--format json`.
+
+        The derived values are included rather than left for the consumer to
+        recompute: a script reading this should not have to know that
+        `top_language` means "first entry of a list we promise is sorted".
+        """
+        return {
+            "login": self.login,
+            "name": self.name,
+            "account_created": self.account_created.isoformat(),
+            "account_age_years": round(self.account_age_years, 2),
+            "total_owned": self.total_owned,
+            "originals": self.originals,
+            "forks": self.forks,
+            "total_stars": self.total_stars,
+            "top_language": self.top_language,
+            "languages": [
+                {"language": lang, "repos": count} for lang, count in self.languages
+            ],
+            "abandoned": self.abandoned,
+            "no_description": self.no_description,
+            "no_language": self.no_language,
+            "commit_samples": [
+                {"repo": sample.repo, "message": sample.message}
+                for sample in self.commit_samples
+            ],
+        }
 
     def as_prompt_block(self) -> str:
         """Compact, factual digest embedded in the LLM prompt as the only evidence."""
