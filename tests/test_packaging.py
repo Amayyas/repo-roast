@@ -1,5 +1,5 @@
-from pathlib import Path
+from importlib.resources import files
 
 
-def test_py_typed_marker_exists() -> None:
-    assert (Path(__file__).parents[1] / "src/repo_roast/py.typed").is_file()
+def test_py_typed_ships_with_the_installed_package() -> None:
+    assert (files("repo_roast") / "py.typed").is_file()
