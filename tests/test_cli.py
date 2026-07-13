@@ -26,6 +26,28 @@ def test_help_renders() -> None:
     assert "--dry-run" in plain(result.output)
 
 
+def test_version_prints_package_version() -> None:
+    result = runner.invoke(cli.app, ["--version"])
+    assert result.exit_code == 0
+    assert plain(result.output).strip() == "0.1.0"
+
+
+def test_commits_option_is_forwarded(
+    monkeypatch: pytest.MonkeyPatch, stats: ProfileStats
+) -> None:
+    monkeypatch.setenv("GITHUB_TOKEN", "token")
+    received: dict[str, object] = {}
+
+    def _gather(*args: object, **kwargs: object) -> ProfileStats:
+        received.update(kwargs)
+        return stats
+
+    monkeypatch.setattr(cli, "gather_stats", _gather)
+    result = runner.invoke(cli.app, ["torvalds", "--dry-run", "-c", "13"])
+    assert result.exit_code == 0
+    assert received["commits_per_repo"] == 13
+
+
 def test_a_missing_github_token_fails_clearly(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
