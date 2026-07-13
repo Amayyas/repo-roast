@@ -5,10 +5,16 @@ on:
     branches: [main]
   pull_request:
 
-# A fresh push to a branch supersedes whatever was still running on it.
+# On a pull request, a fresh push supersedes the run it replaces -- nobody cares
+# about the verdict on a commit that no longer exists.
+#
+# On main, never cancel: two merges landing back to back would leave the first
+# commit with no CI result at all, and the badge showing a cancelled run for a
+# tree that is perfectly healthy. Every commit on main is a release candidate and
+# deserves its own verdict, even if the next one is seconds behind it.
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 # Least privilege: nothing here needs to write to the repository. Pull requests
 # from forks get a read-only token and no access to secrets, which is what makes
