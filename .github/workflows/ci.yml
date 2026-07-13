@@ -42,9 +42,7 @@ jobs:
           cache: pip
           cache-dependency-path: pyproject.toml
       - run: pip install -e ".[dev]"
-      # tests/ joins in once #6 ships the py.typed marker: without it, mypy
-      # cannot see this package's own annotations from the outside.
-      - run: mypy --strict src
+      - run: mypy --strict src tests
 
   test:
     name: test (py${{ matrix.python-version }})
