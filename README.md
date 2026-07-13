@@ -12,7 +12,7 @@ It shows its receipts: every roast is preceded by an evidence table, and the
 model is instructed to only joke about facts that are actually in the data.
 
 ```
-$ repo-roast torvalds --spice hot
+$ repo-roast roast torvalds --spice hot
 ```
 
 ## Install
@@ -39,14 +39,23 @@ Then fill in:
 ## Usage
 
 ```bash
-repo-roast                        # roast yourself (the authenticated user)
-repo-roast torvalds               # roast someone else
-repo-roast torvalds --spice hot   # roast them harder
-repo-roast torvalds --dry-run     # evidence + the exact prompt, no LLM call
-repo-roast --help
+repo-roast roast                        # roast yourself (the authenticated user)
+repo-roast roast torvalds               # roast someone else
+repo-roast roast torvalds --spice hot   # roast them harder
+repo-roast roast torvalds --dry-run     # evidence + the exact prompt, no LLM call
+repo-roast --help                       # the commands
+repo-roast roast --help                 # the flags below
 ```
 
+> **Breaking change in 0.2.0.** The tool now takes a sub-command: `repo-roast
+> torvalds` became `repo-roast roast torvalds`. This makes room for the commands
+> that follow — `compare`, `repo` — without `compare` being ambiguous with a user
+> who happens to be called *compare*. The old form prints the new one rather than
+> a bare "No such command".
+
 ### Flags
+
+Flags belong to `roast`. `--version` belongs to the top level.
 
 | Flag | Default | Meaning |
 | --- | --- | --- |

@@ -14,7 +14,7 @@ from .github_client import gather_stats
 from .roast import build_prompt, generate_roast
 from .stats import CommitSample, ProfileStats
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 __all__ = [
     "CommitSample",
