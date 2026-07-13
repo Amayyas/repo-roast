@@ -54,8 +54,10 @@ repo-roast --help
 | `--spice` / `-s` | `medium` | `mild`, `medium`, or `hot`. |
 | `--model` / `-m` | `$LLM_MODEL` or `llama-3.3-70b-versatile` | Model name to send to the provider. |
 | `--repos` / `-r` | `5` | How many recently-pushed repos to sample commit messages from. |
+| `--commits` / `-c` | `8` | Commits to sample per repository (1–50). |
 | `--evidence` / `--no-evidence` | on | Show the stats table. |
 | `--dry-run` | off | Gather stats, print the evidence table and the exact prompt, then exit — **no LLM call and no `LLM_API_KEY` required**. |
+| `--version` | off | Print the installed version and exit. |
 
 `--dry-run` is the quickest way to check the GitHub half on its own.
 

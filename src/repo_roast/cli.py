@@ -83,8 +83,11 @@ def _evidence_table(stats: ProfileStats) -> Table:
 @app.command()
 def roast(
     version: bool = typer.Option(
-        False, "--version", callback=_version_callback, is_eager=True,
-        help="Show the version and exit."
+        False,
+        "--version",
+        callback=_version_callback,
+        is_eager=True,
+        help="Show the version and exit.",
     ),
     username: str = typer.Argument(
         None,
@@ -100,7 +103,12 @@ def roast(
         5, "--repos", "-r", help="Recent repos to sample commit messages from."
     ),
     commits: int = typer.Option(
-        8, "--commits", "-c", min=1, help="Commits to sample per repository."
+        8,
+        "--commits",
+        "-c",
+        min=1,
+        max=50,
+        help="Commits to sample per repository.",
     ),
     evidence: bool = typer.Option(
         True, "--evidence/--no-evidence", help="Show the stats table."
