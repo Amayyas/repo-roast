@@ -1,0 +1,18 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: detect-private-key
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    # Pinned to match the ruff version CI resolves (pyproject: ruff>=0.4, no
+    # ceiling). A hook version behind CI can format cleanly locally and still
+    # get rejected by the lint job -- the hook causing the exact problem it
+    # exists to prevent. Bump this alongside ruff in pyproject.toml.
+    rev: v0.15.22
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
