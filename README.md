@@ -117,6 +117,9 @@ pushed originals, up to 8 commits each.
 Questions, bugs, or a roast that missed? Reach out at
 **amayyas.aouadene@epitech.eu**.
 
+Found a security issue? See [SECURITY.md](SECURITY.md) instead of opening a
+public issue.
+
 ## License
 
 [MIT](LICENSE) © Amayyas Aouadene
