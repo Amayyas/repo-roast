@@ -115,11 +115,14 @@ pushed originals, up to 8 commits each.
 
 ## Support
 
-Questions, bugs, or a roast that missed? Reach out at
-**amayyas.aouadene@epitech.eu**.
+Questions, bugs, or a roast that missed? See [SUPPORT.md](SUPPORT.md), or
+reach out directly at **amayyas.aouadene@epitech.eu**.
 
 Found a security issue? See [SECURITY.md](SECURITY.md) instead of opening a
 public issue.
+
+Want to contribute? See [CONTRIBUTING.md](CONTRIBUTING.md). This project
+follows a [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## License
 
