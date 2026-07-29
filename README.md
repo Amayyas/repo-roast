@@ -113,6 +113,25 @@ repo listing that PyGithub already paginates. The **only** per-repo calls are fo
 commit messages, and they are bounded on both axes: the `--repos` most recently
 pushed originals, up to 8 commits each.
 
+## Ethical use
+
+repo-roast generates jokes about **named, real people** from their public
+GitHub activity. That comes with rules, not just a disclaimer:
+
+- Roast the code and the habits — commit hygiene, abandoned repos, a
+  suspicious `TODO` — never the person. No appearance, no identity, no
+  protected characteristic. The system prompt enforces this on every call, and
+  it's the first hard rule in `roast.py`.
+- Don't use the output to harass, dogpile, or target someone who didn't ask
+  for it. A roast run against a stranger without their knowledge is not the
+  friendly-jab use case this tool is built for.
+- This isn't only a prompt-level promise. [SECURITY.md](SECURITY.md#prompt-injection-the-threat-this-tool-is-actually-exposed-to)
+  documents the structural defense that keeps a booby-trapped repo from
+  turning the tool into a weapon against whoever is being roasted.
+
+This project follows a [Code of Conduct](CODE_OF_CONDUCT.md); the same spirit
+applies to how the tool itself gets used.
+
 ## Support
 
 Questions, bugs, or a roast that missed? See [SUPPORT.md](SUPPORT.md), or
