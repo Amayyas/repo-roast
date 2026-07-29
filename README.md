@@ -3,6 +3,7 @@
 [![CI](https://github.com/Amayyas/repo-roast/actions/workflows/ci.yml/badge.svg)](https://github.com/Amayyas/repo-roast/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue)](https://www.python.org)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/Amayyas/repo-roast/badge)](https://scorecard.dev/viewer/?uri=github.com/Amayyas/repo-roast)
 
 A terminal CLI that reads a GitHub profile through the **GitHub REST API** —
 repos, language breakdown, stars, abandoned projects, and a sample of recent
