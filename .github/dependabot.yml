@@ -16,3 +16,11 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    groups:
+      # init, analyze and upload-sarif are three references to the same
+      # release and must move together: analyze reads the config init wrote,
+      # and a version mismatch between them fails the job outright. Without
+      # this, Dependabot opens one PR per reference, and any one of them
+      # merged alone breaks CodeQL.
+      codeql-action:
+        patterns: ["github/codeql-action*"]
