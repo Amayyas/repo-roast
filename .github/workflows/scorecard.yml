@@ -1,0 +1,45 @@
+name: Scorecard
+
+on:
+  push:
+    branches: [main]
+  branch_protection_rule:
+  schedule:
+    - cron: "23 5 * * 3"
+
+# Not run on pull_request: a fork PR gets a read-only token with no
+# id-token, which publishing a Scorecard result requires. Scorecard assesses
+# the repo's overall posture, not a diff, so main + a weekly schedule covers it.
+permissions: read-all
+
+jobs:
+  analysis:
+    name: analysis
+    runs-on: ubuntu-latest
+    permissions:
+      # Scorecard needs to read all repo data to score it, and to publish the
+      # result and its provenance attestation.
+      security-events: write
+      id-token: write
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - uses: ossf/scorecard-action@2d1146689b8cda280b9bc96326124645441f03bc # v2.4.4
+        with:
+          results_file: results.sarif
+          results_format: sarif
+          publish_results: true
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: SARIF file
+          path: results.sarif
+          retention-days: 5
+
+      - uses: github/codeql-action/upload-sarif@4187e74d05793876e9989daffde9c3e66b4acd07 # v3.37.3
+        with:
+          sarif_file: results.sarif
