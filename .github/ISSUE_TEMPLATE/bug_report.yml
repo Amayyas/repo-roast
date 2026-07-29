@@ -1,0 +1,53 @@
+name: Bug report
+description: Something doesn't work the way it should.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time. Before filing: never paste a `GITHUB_TOKEN`
+        or `LLM_API_KEY` here, even redacted — if one was ever exposed, treat
+        it as compromised and revoke it (see [SECURITY.md](../../SECURITY.md)).
+
+  - type: input
+    id: version
+    attributes:
+      label: repo-roast version
+      description: Output of `repo-roast --version`.
+    validations:
+      required: true
+
+  - type: input
+    id: command
+    attributes:
+      label: Command
+      description: The exact command you ran.
+      placeholder: repo-roast roast torvalds --spice hot
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: What happened instead
+      description: >-
+        Paste the terminal output. Errors already print a clear message and a
+        hint (see `errors.py`) — include both.
+    validations:
+      required: true
+
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: OS and Python version (`python --version`).
+      placeholder: macOS 15, Python 3.12
+    validations:
+      required: false
