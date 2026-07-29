@@ -1,0 +1,26 @@
+name: Feature request
+description: Suggest something repo-roast should do.
+labels: ["type: feature"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+      description: The situation, not the solution — what's missing today?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would you like to see?
+      description: A rough shape is fine — a flag, a sub-command, an output format.
+    validations:
+      required: false
+
+  - type: markdown
+    attributes:
+      value: |
+        Worth a skim first: [issues labeled `type:
+        feature`](https://github.com/Amayyas/repo-roast/issues?q=is%3Aissue+label%3A%22type%3A+feature%22)
+        — this might already be planned.
