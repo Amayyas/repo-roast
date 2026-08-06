@@ -16,8 +16,85 @@ jobs:
   release-please:
     name: release-please
     runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
     steps:
       - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        id: release
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+
+  # The steps below run only when the job above just cut a release -- on every
+  # other push to main, release-please has nothing to do and everything below
+  # is skipped. Being in this same workflow run (rather than a separate one
+  # triggered by `release: published`) sidesteps a real limitation: resources
+  # release-please creates are authored by the built-in GITHUB_TOKEN, and
+  # GITHUB_TOKEN-authored events don't trigger other workflows. A downstream
+  # job in the same run has no such problem -- it just reads the job output
+  # above directly.
+
+  build:
+    name: build
+    needs: release-please
+    if: ${{ needs.release-please.outputs.release_created }}
+    runs-on: ubuntu-latest
+    steps:
+      # The tag release-please just created, not main's tip a moment later --
+      # what gets published should be exactly what the release says it is.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.release-please.outputs.tag_name }}
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - run: pip install build
+      - run: python -m build
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: dist
+          path: dist/
+
+  publish-pypi:
+    name: publish to PyPI
+    needs: [release-please, build]
+    if: ${{ needs.release-please.outputs.release_created }}
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/repo-roast/
+    permissions:
+      # Mandatory for trusted publishing: mints the OIDC token PyPI exchanges
+      # for a short-lived credential. No PYPI_TOKEN secret exists anywhere --
+      # this permission is the entire authentication mechanism.
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+
+  attest-and-attach:
+    name: attest and attach to the release
+    needs: [release-please, build]
+    if: ${{ needs.release-please.outputs.release_created }}
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+      # To attach dist/* to the GitHub Release with `gh release upload`.
+      contents: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: dist
+          path: dist/
+      - uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-path: "dist/*"
+      - env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload ${{ needs.release-please.outputs.tag_name }} dist/* --repo ${{ github.repository }}
