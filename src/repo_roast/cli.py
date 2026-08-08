@@ -18,18 +18,21 @@ from typer.core import TyperGroup
 
 from . import __version__
 from .errors import GitHubAuthError, LLMAuthError, RepoRoastError
-from .github_client import gather_stats
+from .github_client import gather_repo_stats, gather_stats
 from .roast import (
     COMPARE_SYSTEM_PROMPT,
     DEFAULT_BASE_URL,
     DEFAULT_MODEL,
+    REPO_SYSTEM_PROMPT,
     SYSTEM_PROMPT,
     build_compare_prompt,
     build_prompt,
+    build_repo_prompt,
+    generate_repo_roast,
     generate_roast,
     generate_verdict,
 )
-from .stats import ProfileStats
+from .stats import ProfileStats, RepoStats
 
 # usecwd is not optional: bare load_dotenv() searches upwards from *this file*,
 # which lives in site-packages once the package is properly installed -- so it
@@ -235,6 +238,66 @@ def _markdown_compare(stats_a: ProfileStats, stats_b: ProfileStats) -> str:
         f"| Metric | @{stats_a.login} | @{stats_b.login} |",
         "| --- | --- | --- |",
         *(f"| {metric} | {rows_a[metric]} | {rows_b[metric]} |" for metric in rows_a),
+    ]
+    return "\n".join(lines)
+
+
+def _repo_metric_rows(stats: RepoStats) -> list[tuple[str, str]]:
+    return [
+        ("Description", stats.description or "—"),
+        ("Age", f"{stats.age_years:.1f} years"),
+        ("Last push", f"{stats.pushed_at:%Y-%m-%d}"),
+        ("Stars / forks / watchers", f"{stats.stars} / {stats.forks} / {stats.watchers}"),
+        ("Language", stats.language or "—"),
+        ("Size", f"{stats.size_kb} KB"),
+        (
+            "PRs sampled (merged/abandoned/open)",
+            f"{stats.prs_sampled} "
+            f"({stats.merged_prs}/{stats.abandoned_prs}/{stats.open_prs})",
+        ),
+        (
+            "Oldest open issue",
+            f"{stats.oldest_open_issue_days}d"
+            if stats.oldest_open_issue_days is not None
+            else "—",
+        ),
+        (
+            "TODO / FIXME hits",
+            f"{stats.todo_count if stats.todo_count is not None else '—'} / "
+            f"{stats.fixme_count if stats.fixme_count is not None else '—'}",
+        ),
+        (
+            "Largest file",
+            f"{stats.largest_file_path} ({stats.largest_file_kb:.1f} KB)"
+            if stats.largest_file_path and stats.largest_file_kb is not None
+            else "—",
+        ),
+        ("Commits sampled", str(len(stats.commit_samples))),
+    ]
+
+
+def _repo_evidence_table(stats: RepoStats) -> Table:
+    table = Table(
+        title=f"Evidence against {stats.full_name}",
+        title_style="bold",
+        header_style="bold cyan",
+    )
+    table.add_column("Metric")
+    table.add_column("Value", justify="right")
+
+    for metric, value in _repo_metric_rows(stats):
+        table.add_row(metric, value)
+
+    return table
+
+
+def _markdown_repo_evidence(stats: RepoStats) -> str:
+    lines = [
+        f"## Evidence against {stats.full_name}",
+        "",
+        "| Metric | Value |",
+        "| --- | --- |",
+        *(f"| {metric} | {value} |" for metric, value in _repo_metric_rows(stats)),
     ]
     return "\n".join(lines)
 
@@ -504,6 +567,140 @@ def compare(
         Panel(
             escape(verdict),
             title=f"Verdict: @{stats_a.login} vs @{stats_b.login}",
+            subtitle=f"spice: {spice.value}",
+            border_style="red",
+            padding=(1, 2),
+        )
+    )
+
+
+@app.command(name="repo")
+def roast_repo(
+    full_name: str = typer.Argument(..., help="A repository, as owner/name."),
+    spice: Spice = typer.Option(
+        Spice.medium, "--spice", "-s", help="How hard the roast hits."
+    ),
+    model: str = typer.Option(
+        None, "--model", "-m", help=f"LLM model name (default: {DEFAULT_MODEL})."
+    ),
+    prs: int = typer.Option(
+        30, "--prs", min=1, max=100, help="Recent pull requests to sample."
+    ),
+    issues: int = typer.Option(
+        30, "--issues", min=1, max=100, help="Recent open issues to sample."
+    ),
+    commits: int = typer.Option(
+        8,
+        "--commits",
+        "-c",
+        min=1,
+        max=50,
+        help="Recent commits to sample.",
+    ),
+    evidence: bool = typer.Option(
+        True, "--evidence/--no-evidence", help="Show the stats table."
+    ),
+    fmt: Format = typer.Option(
+        Format.text, "--format", "-f", help="How to render the result."
+    ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Print the evidence and the exact prompt, without calling the LLM.",
+    ),
+) -> None:
+    """Roast a repository -- its PRs, issues, commits and code -- not a person."""
+    github_token, llm_api_key, base_url, chosen_model = _resolve_credentials(
+        model, dry_run
+    )
+
+    try:
+        with err_console.status(f"[cyan]Reading {full_name} from the GitHub API..."):
+            stats = gather_repo_stats(
+                github_token,
+                full_name,
+                prs_sampled=prs,
+                issues_sampled=issues,
+                commits_sampled=commits,
+            )
+    except RepoRoastError as exc:
+        _fail(exc)
+
+    if evidence and fmt is Format.text:
+        console.print()
+        console.print(_repo_evidence_table(stats))
+
+    if dry_run:
+        user_message = build_repo_prompt(stats, spice.value)
+
+        if fmt is Format.json:
+            _emit_json(
+                {
+                    "repo": stats.to_dict(),
+                    "prompt": {"system": REPO_SYSTEM_PROMPT, "user": user_message},
+                    "model": chosen_model,
+                    "base_url": base_url,
+                    "spice": spice.value,
+                }
+            )
+            return
+
+        if fmt is Format.markdown:
+            blocks = [_markdown_repo_evidence(stats)] if evidence else []
+            blocks += [
+                "## Prompt that would be sent",
+                f"`{chosen_model}` @ `{base_url}`",
+                f"```\nSYSTEM\n{REPO_SYSTEM_PROMPT}\n\nUSER\n{user_message}\n```",
+            ]
+            typer.echo("\n\n".join(blocks))
+            return
+
+        console.print()
+        console.print(
+            Panel(
+                f"[bold]SYSTEM[/]\n{escape(REPO_SYSTEM_PROMPT)}\n\n"
+                f"[bold]USER[/]\n{escape(user_message)}",
+                title="Prompt that would be sent",
+                subtitle=f"{chosen_model} @ {base_url}",
+                border_style="dim",
+            )
+        )
+        return
+
+    try:
+        with err_console.status("[red]Preparing the roast..."):
+            text = generate_repo_roast(
+                stats,
+                api_key=llm_api_key,
+                model=chosen_model,
+                base_url=base_url,
+                spice=spice.value,
+            )
+    except RepoRoastError as exc:
+        _fail(exc)
+
+    if fmt is Format.json:
+        _emit_json(
+            {
+                "repo": stats.to_dict(),
+                "roast": text,
+                "model": chosen_model,
+                "spice": spice.value,
+            }
+        )
+        return
+
+    if fmt is Format.markdown:
+        blocks = [_markdown_repo_evidence(stats)] if evidence else []
+        blocks += [f"## Roast of {stats.full_name}", text]
+        typer.echo("\n\n".join(blocks))
+        return
+
+    console.print()
+    console.print(
+        Panel(
+            escape(text),
+            title=f"Roast of {stats.full_name}",
             subtitle=f"spice: {spice.value}",
             border_style="red",
             padding=(1, 2),

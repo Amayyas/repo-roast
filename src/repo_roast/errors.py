@@ -35,6 +35,18 @@ class UserNotFoundError(GitHubError):
     """No such GitHub user."""
 
 
+class RepoNotFoundError(GitHubError):
+    """No such repository."""
+
+
+class InvalidRepoNameError(RepoRoastError):
+    """The repo identifier isn't in owner/name form.
+
+    Not a GitHubError: this never reaches the API at all -- it's rejected at
+    the boundary, before a request is even built.
+    """
+
+
 class RateLimitError(GitHubError):
     """The hourly GitHub quota is spent."""
 

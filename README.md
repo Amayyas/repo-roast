@@ -45,36 +45,48 @@ repo-roast roast torvalds               # roast someone else
 repo-roast roast torvalds --spice hot   # roast them harder
 repo-roast roast torvalds --dry-run     # evidence + the exact prompt, no LLM call
 repo-roast compare torvalds gvanrossum  # roast battle: two profiles, one verdict
+repo-roast repo psf/requests            # roast a repository, not a person
 repo-roast --help                       # the commands
 repo-roast roast --help                 # the flags below
 ```
 
 > **Breaking change in 0.2.0.** The tool now takes a sub-command: `repo-roast
 > torvalds` became `repo-roast roast torvalds`. This made room for `compare`
-> below (and `repo`, still to come) without `compare` being ambiguous with a
-> user who happens to be called *compare*. The old form prints the new one
-> rather than a bare "No such command".
+> and `repo` below, without `compare` being ambiguous with a user who happens
+> to be called *compare*. The old form prints the new one rather than a bare
+> "No such command".
 
 ### Flags
 
-`roast` and `compare` share every flag below. `compare` takes two usernames
-instead of one, both required — there is no "compare yourself" default.
-`--version` belongs to the top level (`repo-roast --version`).
+`--spice`, `--model`, `--commits`, `--evidence`, `--format` and `--dry-run`
+mean the same thing on all three commands. `--version` belongs to the top
+level (`repo-roast --version`).
 
 | Flag | Default | Meaning |
 | --- | --- | --- |
 | `username` (positional, `roast`) | authenticated user | Which GitHub user to roast. |
 | `username_a` / `username_b` (positional, `compare`) | — | The two GitHub users to pit against each other. |
+| `full_name` (positional, `repo`) | — | A repository, as `owner/name`. |
 | `--spice` / `-s` | `medium` | `mild`, `medium`, or `hot`. |
 | `--model` / `-m` | `$LLM_MODEL` or `llama-3.3-70b-versatile` | Model name to send to the provider. |
-| `--repos` / `-r` | `5` | How many recently-pushed repos to sample commit messages from. |
-| `--commits` / `-c` | `8` | Commits to sample per repository (1–50). |
+| `--repos` / `-r` (`roast`, `compare`) | `5` | How many recently-pushed repos to sample commit messages from. |
+| `--prs` (`repo`) | `30` | Recent pull requests to sample. |
+| `--issues` (`repo`) | `30` | Recent open issues to sample. |
+| `--commits` / `-c` | `8` | Commits to sample (per repository, for `roast`/`compare`; from the target repo, for `repo`). 1–50. |
 | `--evidence` / `--no-evidence` | on | Show the stats table. |
 | `--format` / `-f` | `text` | `text`, `json`, or `markdown`. |
 | `--dry-run` | off | Gather stats, print the evidence table and the exact prompt, then exit — **no LLM call and no `LLM_API_KEY` required**. |
 | `--version` | off | Print the installed version and exit. |
 
 `--dry-run` is the quickest way to check the GitHub half on its own.
+
+`repo` samples pull requests, issues, the repository's file tree, and a code
+search for `TODO`/`FIXME` — all bounded, the same way `roast`'s commit sampling
+is. It deliberately does not compute mean-time-to-review (would need one extra
+API call per sampled PR) or "commits pushed at odd hours" (GitHub normalises
+commit timestamps to UTC server-side, so the author's real local hour isn't
+recoverable from the API at all — reporting a UTC hour as if it were local
+would be presenting a fact that isn't actually in the data).
 
 ### Scripting it
 
@@ -84,6 +96,7 @@ instead of one, both required — there is no "compare yourself" default.
 repo-roast roast torvalds -f json | jq '.stats.total_stars'
 repo-roast roast torvalds -f json --dry-run | jq -r '.prompt.user'
 repo-roast compare torvalds gvanrossum -f json | jq -r '.verdict'
+repo-roast repo psf/requests -f json | jq -r '.repo.oldest_open_issue_days'
 ```
 
 Progress spinners and error messages go to **stderr**, so a pipe receives either
@@ -150,6 +163,11 @@ GitHub activity. That comes with rules, not just a disclaimer:
 - This isn't only a prompt-level promise. [SECURITY.md](SECURITY.md#prompt-injection-the-threat-this-tool-is-actually-exposed-to)
   documents the structural defense that keeps a booby-trapped repo from
   turning the tool into a weapon against whoever is being roasted.
+
+`repo-roast repo` sidesteps the "named person" concern differently: it targets
+a codebase's pull requests, issues, and commits, not an individual. The data it
+hands to the model never includes a contributor's name, so the model has
+nothing to single anyone out with in the first place.
 
 This project follows a [Code of Conduct](CODE_OF_CONDUCT.md); the same spirit
 applies to how the tool itself gets used.
