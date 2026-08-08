@@ -106,6 +106,23 @@ environment variables.
 Model strings change over time — if a call 404s, check the provider's current
 model list.
 
+## Running it with Docker
+
+No local Python needed. Images are published to the GitHub Container Registry
+on every release, for `linux/amd64` and `linux/arm64`:
+
+```bash
+docker run --rm -e GITHUB_TOKEN=ghp_... -e LLM_API_KEY=gsk_... \
+  ghcr.io/amayyas/repo-roast roast torvalds --spice hot
+```
+
+Environment variables, not a mounted `.env`: simpler, and there is no file to
+accidentally bake into a container. `LLM_BASE_URL` and `LLM_MODEL` work the
+same way if you are pointing at a different provider.
+
+Tags: `latest` tracks the newest release, `vX.Y.Z` pins a specific one — same
+versions as PyPI.
+
 ## How it stays polite to the API
 
 Repo metadata (languages, stars, descriptions, push dates) comes from the single
