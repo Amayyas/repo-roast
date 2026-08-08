@@ -127,3 +127,34 @@ jobs:
             && { echo "::error::the .env in the working directory was ignored"; exit 1; }
           echo "$output" | grep -q "rejected your GITHUB_TOKEN" \
             || { echo "::error::expected the token from .env to be sent and refused"; exit 1; }
+
+  docker:
+    name: docker
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+      # load: true, not push: single platform (the runner's own arch) is enough
+      # to lint the Dockerfile and scan for CVEs on every PR. The real
+      # multi-arch build only happens in release-please.yml, on an actual
+      # release -- there is no registry to push a PR's image to anyway.
+      - uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          push: false
+          load: true
+          tags: repo-roast:ci
+      # Not a one-time check: python:3.12-slim-bookworm is a moving tag, and an
+      # OS-level CVE can appear in it independently of anything this repo
+      # changes. Scanning on every push keeps that drift caught continuously
+      # rather than trusted once at Dockerfile-authoring time. ignore-unfixed
+      # skips CVEs upstream has not patched yet -- failing on those would be a
+      # permanently red, unactionable check.
+      - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: repo-roast:ci
+          format: table
+          exit-code: "1"
+          ignore-unfixed: true
+          vuln-type: os,library
+          severity: CRITICAL,HIGH
