@@ -16,7 +16,13 @@ import httpx
 import pytest
 
 from repo_roast import github_client, roast
-from repo_roast.stats import CommitSample, ProfileStats
+from repo_roast.stats import (
+    CommitSample,
+    IssueSample,
+    ProfileStats,
+    PullSample,
+    RepoStats,
+)
 
 NOW = datetime.now(timezone.utc)
 
@@ -125,6 +131,144 @@ def install_github(
     return _install
 
 
+class FakePullRequest:
+    def __init__(self, number: int, title: str, state: str, merged: bool) -> None:
+        self.number = number
+        self.title = title
+        self.state = state
+        self.merged = merged
+
+
+class FakeIssue:
+    def __init__(
+        self,
+        number: int,
+        title: str,
+        created_days_ago: int,
+        is_pull_request: bool = False,
+    ) -> None:
+        self.number = number
+        self.title = title
+        self.created_at = NOW - timedelta(days=created_days_ago)
+        # Real PyGithub sets this to a non-None object for issues that are
+        # actually pull requests -- the value itself is never read.
+        self.pull_request = object() if is_pull_request else None
+
+
+class FakeTreeEntry:
+    def __init__(self, path: str, entry_type: str, size: int | None) -> None:
+        self.path = path
+        self.type = entry_type
+        self.size = size
+
+
+class FakeGitTree:
+    def __init__(self, entries: list[FakeTreeEntry], truncated: bool = False) -> None:
+        self.tree = entries
+        self.truncated = truncated
+
+
+class FakeGitHubRepo:
+    """The subset of a PyGithub Repository that gather_repo_stats() reads."""
+
+    def __init__(
+        self,
+        full_name: str = "amayyas/repo-roast",
+        description: str | None = "a repo",
+        default_branch: str = "main",
+        created_days_ago: int = 365,
+        pushed_days_ago: int = 1,
+        archived: bool = False,
+        stars: int = 10,
+        forks: int = 2,
+        watchers: int = 3,
+        language: str | None = "Python",
+        size_kb: int = 100,
+        open_issues_count: int = 5,
+        pulls: list[FakePullRequest] | None = None,
+        issues: list[FakeIssue] | None = None,
+        tree: FakeGitTree | None = None,
+        tree_raises: Exception | None = None,
+        commits: list[str] | None = None,
+        commits_raise: Exception | None = None,
+    ) -> None:
+        self.full_name = full_name
+        self.description = description
+        self.default_branch = default_branch
+        self.created_at = NOW - timedelta(days=created_days_ago)
+        self.pushed_at = NOW - timedelta(days=pushed_days_ago)
+        self.archived = archived
+        self.stargazers_count = stars
+        self.forks_count = forks
+        self.subscribers_count = watchers
+        self.language = language
+        self.size = size_kb
+        self.open_issues_count = open_issues_count
+        self.name = full_name.split("/")[-1]
+
+        self._pulls = pulls or []
+        self._issues = issues or []
+        self._tree = tree or FakeGitTree([])
+        self._tree_raises = tree_raises
+        self._commits = commits or []
+        self._commits_raise = commits_raise
+
+    def get_pulls(
+        self, state: str = "open", sort: str = "created", direction: str = "desc"
+    ) -> list[FakePullRequest]:
+        return self._pulls
+
+    def get_issues(
+        self, state: str = "open", sort: str = "created", direction: str = "asc"
+    ) -> list[FakeIssue]:
+        return self._issues
+
+    def get_git_tree(self, sha: str, recursive: bool = False) -> FakeGitTree:
+        if self._tree_raises is not None:
+            raise self._tree_raises
+        return self._tree
+
+    def get_commits(self) -> list[SimpleNamespace]:
+        if self._commits_raise is not None:
+            raise self._commits_raise
+        return [SimpleNamespace(commit=SimpleNamespace(message=m)) for m in self._commits]
+
+
+@pytest.fixture
+def install_github_repo(
+    monkeypatch: pytest.MonkeyPatch,
+) -> Callable[..., None]:
+    """Swap PyGithub's Github class for one serving a canned repository."""
+
+    def _install(
+        repo: FakeGitHubRepo | None = None,
+        raises: Exception | None = None,
+        search_counts: dict[str, int] | None = None,
+        search_raises: Exception | None = None,
+    ) -> None:
+        counts = search_counts or {}
+
+        class _FakeGithub:
+            def __init__(self, *args: Any, **kwargs: Any) -> None:
+                pass
+
+            def get_repo(self, full_name: str) -> FakeGitHubRepo:
+                if raises is not None:
+                    raise raises
+                assert repo is not None
+                return repo
+
+            def search_code(self, query: str) -> SimpleNamespace:
+                if search_raises is not None:
+                    raise search_raises
+                term = query.split()[0]  # "TODO repo:owner/name" -> "TODO"
+                return SimpleNamespace(totalCount=counts.get(term, 0))
+
+        monkeypatch.setattr(github_client, "Github", _FakeGithub)
+
+    return _install
+
+
 # --- LLM doubles ----------------------------------------------------------
 
 
@@ -205,6 +349,37 @@ def other_stats() -> ProfileStats:
         no_description=3,
         no_language=1,
         commit_samples=[CommitSample(repo="other-repo", message="wip please ignore")],
+    )
+
+
+@pytest.fixture
+def repo_stats() -> RepoStats:
+    return RepoStats(
+        full_name="amayyas/repo-roast",
+        description="Roast a GitHub profile",
+        default_branch="main",
+        created_at=NOW - timedelta(days=365),
+        pushed_at=NOW - timedelta(days=1),
+        archived=False,
+        stars=42,
+        forks=7,
+        watchers=5,
+        language="Python",
+        size_kb=250,
+        open_issues_and_prs=12,
+        prs_sampled=10,
+        merged_prs=6,
+        abandoned_prs=3,
+        open_prs=1,
+        abandoned_pr_samples=[PullSample(number=99, title="dead pr", state="closed")],
+        issues_sampled=4,
+        oldest_open_issue_days=800,
+        stale_issue_samples=[IssueSample(number=11, title="ancient bug", age_days=800)],
+        todo_count=5,
+        fixme_count=1,
+        largest_file_path="tests/test_cli.py",
+        largest_file_kb=16.6,
+        commit_samples=[CommitSample(repo="repo-roast", message="fix: it works now")],
     )
 
 
