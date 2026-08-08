@@ -20,11 +20,14 @@ from . import __version__
 from .errors import GitHubAuthError, LLMAuthError, RepoRoastError
 from .github_client import gather_stats
 from .roast import (
+    COMPARE_SYSTEM_PROMPT,
     DEFAULT_BASE_URL,
     DEFAULT_MODEL,
     SYSTEM_PROMPT,
+    build_compare_prompt,
     build_prompt,
     generate_roast,
+    generate_verdict,
 )
 from .stats import ProfileStats
 
@@ -121,6 +124,55 @@ def _fail(exc: RepoRoastError) -> NoReturn:
     raise typer.Exit(1)
 
 
+def _resolve_credentials(model: str | None, dry_run: bool) -> tuple[str, str, str, str]:
+    """GITHUB_TOKEN, LLM_API_KEY, the base URL, and the model to use.
+
+    LLM_API_KEY is required except in --dry-run, which never reaches the LLM.
+    Both roast and compare need exactly this, so it lives in one place with one
+    set of error messages rather than two copies that could drift apart.
+    """
+    github_token = os.getenv("GITHUB_TOKEN")
+    if not github_token:
+        _fail(
+            GitHubAuthError(
+                "GITHUB_TOKEN is not set.",
+                hint="Copy .env.example to .env and add a GitHub personal access token.",
+            )
+        )
+
+    # str, not str | None: --dry-run returns long before this is ever read.
+    llm_api_key = os.getenv("LLM_API_KEY", "")
+    if not llm_api_key and not dry_run:
+        _fail(
+            LLMAuthError(
+                "LLM_API_KEY is not set.",
+                hint="Get a free key at https://console.groq.com/, or use --dry-run.",
+            )
+        )
+
+    base_url = os.getenv("LLM_BASE_URL") or DEFAULT_BASE_URL
+    chosen_model = model or os.getenv("LLM_MODEL") or DEFAULT_MODEL
+    return github_token, llm_api_key, base_url, chosen_model
+
+
+def _metric_rows(stats: ProfileStats) -> list[tuple[str, str]]:
+    """The evidence table's rows, shared by the single-profile and compare
+    renderers (Rich table, Markdown table, JSON is unaffected) so the list of
+    what counts as evidence lives in exactly one place."""
+    return [
+        ("Name", stats.name or "—"),
+        ("Account age", f"{stats.account_age_years:.1f} years"),
+        ("Repos owned", str(stats.total_owned)),
+        ("Originals / forks", f"{stats.originals} / {stats.forks}"),
+        ("Total stars", str(stats.total_stars)),
+        ("Top language", stats.top_language or "—"),
+        ("Abandoned (1y+ untouched)", str(stats.abandoned)),
+        ("No description", str(stats.no_description)),
+        ("No language detected", str(stats.no_language)),
+        ("Commits sampled", str(len(stats.commit_samples))),
+    ]
+
+
 def _evidence_table(stats: ProfileStats) -> Table:
     table = Table(
         title=f"Evidence against @{stats.login}",
@@ -130,16 +182,26 @@ def _evidence_table(stats: ProfileStats) -> Table:
     table.add_column("Metric")
     table.add_column("Value", justify="right")
 
-    table.add_row("Name", stats.name or "—")
-    table.add_row("Account age", f"{stats.account_age_years:.1f} years")
-    table.add_row("Repos owned", str(stats.total_owned))
-    table.add_row("Originals / forks", f"{stats.originals} / {stats.forks}")
-    table.add_row("Total stars", str(stats.total_stars))
-    table.add_row("Top language", stats.top_language or "—")
-    table.add_row("Abandoned (1y+ untouched)", str(stats.abandoned))
-    table.add_row("No description", str(stats.no_description))
-    table.add_row("No language detected", str(stats.no_language))
-    table.add_row("Commits sampled", str(len(stats.commit_samples)))
+    for metric, value in _metric_rows(stats):
+        table.add_row(metric, value)
+
+    return table
+
+
+def _compare_table(stats_a: ProfileStats, stats_b: ProfileStats) -> Table:
+    table = Table(
+        title=f"@{stats_a.login} vs @{stats_b.login}",
+        title_style="bold",
+        header_style="bold cyan",
+    )
+    table.add_column("Metric")
+    table.add_column(f"@{stats_a.login}", justify="right")
+    table.add_column(f"@{stats_b.login}", justify="right")
+
+    rows_a = dict(_metric_rows(stats_a))
+    rows_b = dict(_metric_rows(stats_b))
+    for metric in rows_a:
+        table.add_row(metric, rows_a[metric], rows_b[metric])
 
     return table
 
@@ -154,24 +216,25 @@ def _emit_json(payload: dict[str, Any]) -> None:
 
 
 def _markdown_evidence(stats: ProfileStats) -> str:
-    rows = [
-        ("Name", stats.name or "—"),
-        ("Account age", f"{stats.account_age_years:.1f} years"),
-        ("Repos owned", str(stats.total_owned)),
-        ("Originals / forks", f"{stats.originals} / {stats.forks}"),
-        ("Total stars", str(stats.total_stars)),
-        ("Top language", stats.top_language or "—"),
-        ("Abandoned (1y+ untouched)", str(stats.abandoned)),
-        ("No description", str(stats.no_description)),
-        ("No language detected", str(stats.no_language)),
-        ("Commits sampled", str(len(stats.commit_samples))),
-    ]
     lines = [
         f"## Evidence against @{stats.login}",
         "",
         "| Metric | Value |",
         "| --- | --- |",
-        *(f"| {metric} | {value} |" for metric, value in rows),
+        *(f"| {metric} | {value} |" for metric, value in _metric_rows(stats)),
+    ]
+    return "\n".join(lines)
+
+
+def _markdown_compare(stats_a: ProfileStats, stats_b: ProfileStats) -> str:
+    rows_a = dict(_metric_rows(stats_a))
+    rows_b = dict(_metric_rows(stats_b))
+    lines = [
+        f"## @{stats_a.login} vs @{stats_b.login}",
+        "",
+        f"| Metric | @{stats_a.login} | @{stats_b.login} |",
+        "| --- | --- | --- |",
+        *(f"| {metric} | {rows_a[metric]} | {rows_b[metric]} |" for metric in rows_a),
     ]
     return "\n".join(lines)
 
@@ -212,29 +275,9 @@ def roast(
     ),
 ) -> None:
     """Read a GitHub profile through the API and roast it."""
-    github_token = os.getenv("GITHUB_TOKEN")
-    if not github_token:
-        _fail(
-            GitHubAuthError(
-                "GITHUB_TOKEN is not set.",
-                hint="Copy .env.example to .env and add a GitHub personal access token.",
-            )
-        )
-
-    # The LLM key is only needed on the path that actually calls the LLM, so
-    # --dry-run stays usable with nothing but a GitHub token. It stays a str
-    # rather than str | None: --dry-run returns long before it is ever read.
-    llm_api_key = os.getenv("LLM_API_KEY", "")
-    if not llm_api_key and not dry_run:
-        _fail(
-            LLMAuthError(
-                "LLM_API_KEY is not set.",
-                hint="Get a free key at https://console.groq.com/, or use --dry-run.",
-            )
-        )
-
-    base_url = os.getenv("LLM_BASE_URL") or DEFAULT_BASE_URL
-    chosen_model = model or os.getenv("LLM_MODEL") or DEFAULT_MODEL
+    github_token, llm_api_key, base_url, chosen_model = _resolve_credentials(
+        model, dry_run
+    )
 
     target = f"@{username}" if username else "you"
     try:
@@ -326,6 +369,141 @@ def roast(
         Panel(
             escape(text),
             title=f"Roast of @{stats.login}",
+            subtitle=f"spice: {spice.value}",
+            border_style="red",
+            padding=(1, 2),
+        )
+    )
+
+
+@app.command()
+def compare(
+    username_a: str = typer.Argument(..., help="First GitHub user."),
+    username_b: str = typer.Argument(..., help="Second GitHub user."),
+    spice: Spice = typer.Option(
+        Spice.medium, "--spice", "-s", help="How hard the verdict hits."
+    ),
+    model: str = typer.Option(
+        None, "--model", "-m", help=f"LLM model name (default: {DEFAULT_MODEL})."
+    ),
+    repos: int = typer.Option(
+        5, "--repos", "-r", help="Recent repos to sample commit messages from."
+    ),
+    commits: int = typer.Option(
+        8,
+        "--commits",
+        "-c",
+        min=1,
+        max=50,
+        help="Commits to sample per repository.",
+    ),
+    evidence: bool = typer.Option(
+        True, "--evidence/--no-evidence", help="Show the side-by-side stats table."
+    ),
+    fmt: Format = typer.Option(
+        Format.text, "--format", "-f", help="How to render the result."
+    ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Print the evidence and the exact prompt, without calling the LLM.",
+    ),
+) -> None:
+    """Roast two GitHub users against each other and declare a winner."""
+    github_token, llm_api_key, base_url, chosen_model = _resolve_credentials(
+        model, dry_run
+    )
+
+    try:
+        with err_console.status(f"[cyan]Reading @{username_a} from the GitHub API..."):
+            stats_a = gather_stats(
+                github_token, username_a, repos_sampled=repos, commits_per_repo=commits
+            )
+        with err_console.status(f"[cyan]Reading @{username_b} from the GitHub API..."):
+            stats_b = gather_stats(
+                github_token, username_b, repos_sampled=repos, commits_per_repo=commits
+            )
+    except RepoRoastError as exc:
+        _fail(exc)
+
+    if evidence and fmt is Format.text:
+        console.print()
+        console.print(_compare_table(stats_a, stats_b))
+
+    if dry_run:
+        user_message = build_compare_prompt(stats_a, stats_b, spice.value)
+
+        if fmt is Format.json:
+            _emit_json(
+                {
+                    "a": stats_a.to_dict(),
+                    "b": stats_b.to_dict(),
+                    "prompt": {"system": COMPARE_SYSTEM_PROMPT, "user": user_message},
+                    "model": chosen_model,
+                    "base_url": base_url,
+                    "spice": spice.value,
+                }
+            )
+            return
+
+        if fmt is Format.markdown:
+            blocks = [_markdown_compare(stats_a, stats_b)] if evidence else []
+            blocks += [
+                "## Prompt that would be sent",
+                f"`{chosen_model}` @ `{base_url}`",
+                f"```\nSYSTEM\n{COMPARE_SYSTEM_PROMPT}\n\nUSER\n{user_message}\n```",
+            ]
+            typer.echo("\n\n".join(blocks))
+            return
+
+        console.print()
+        console.print(
+            Panel(
+                f"[bold]SYSTEM[/]\n{escape(COMPARE_SYSTEM_PROMPT)}\n\n"
+                f"[bold]USER[/]\n{escape(user_message)}",
+                title="Prompt that would be sent",
+                subtitle=f"{chosen_model} @ {base_url}",
+                border_style="dim",
+            )
+        )
+        return
+
+    try:
+        with err_console.status("[red]Judging the battle..."):
+            verdict = generate_verdict(
+                stats_a,
+                stats_b,
+                api_key=llm_api_key,
+                model=chosen_model,
+                base_url=base_url,
+                spice=spice.value,
+            )
+    except RepoRoastError as exc:
+        _fail(exc)
+
+    if fmt is Format.json:
+        _emit_json(
+            {
+                "a": stats_a.to_dict(),
+                "b": stats_b.to_dict(),
+                "verdict": verdict,
+                "model": chosen_model,
+                "spice": spice.value,
+            }
+        )
+        return
+
+    if fmt is Format.markdown:
+        blocks = [_markdown_compare(stats_a, stats_b)] if evidence else []
+        blocks += [f"## Verdict: @{stats_a.login} vs @{stats_b.login}", verdict]
+        typer.echo("\n\n".join(blocks))
+        return
+
+    console.print()
+    console.print(
+        Panel(
+            escape(verdict),
+            title=f"Verdict: @{stats_a.login} vs @{stats_b.login}",
             subtitle=f"spice: {spice.value}",
             border_style="red",
             padding=(1, 2),

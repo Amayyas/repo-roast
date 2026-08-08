@@ -92,6 +92,18 @@ def test_dry_run_needs_no_llm_key(
     assert "fix: it works now" in plain(result.output)  # the evidence reached the prompt
 
 
+def test_dry_run_markdown_prints_the_prompt(
+    monkeypatch: pytest.MonkeyPatch, canned_github: None
+) -> None:
+    monkeypatch.setenv("GITHUB_TOKEN", "token")
+    result = runner.invoke(cli.app, ["roast", "torvalds", "--dry-run", "-f", "markdown"])
+    output = plain(result.stdout)
+
+    assert result.exit_code == 0
+    assert "## Prompt that would be sent" in output
+    assert "fix: it works now" in output
+
+
 def test_dry_run_never_calls_the_llm(
     monkeypatch: pytest.MonkeyPatch, canned_github: None
 ) -> None:
@@ -295,3 +307,195 @@ def test_the_default_format_is_still_the_rich_panel(
     result = runner.invoke(cli.app, ["roast", "torvalds"])
 
     assert "Evidence against" in plain(result.output)
+
+
+# --- compare / roast battle ------------------------------------------------
+
+
+@pytest.fixture
+def canned_compare_github(
+    monkeypatch: pytest.MonkeyPatch, stats: ProfileStats, other_stats: ProfileStats
+) -> None:
+    by_login = {stats.login: stats, other_stats.login: other_stats}
+
+    def _gather(
+        token: str, username: str | None = None, **kwargs: object
+    ) -> ProfileStats:
+        assert username in by_login, f"unexpected username: {username!r}"
+        return by_login[username]
+
+    monkeypatch.setattr(cli, "gather_stats", _gather)
+
+
+def test_compare_help_lists_its_flags() -> None:
+    result = runner.invoke(cli.app, ["compare", "--help"])
+
+    assert result.exit_code == 0
+    assert "--dry-run" in plain(result.output)
+
+
+def test_compare_dry_run_needs_no_llm_key(
+    monkeypatch: pytest.MonkeyPatch, canned_compare_github: None
+) -> None:
+    monkeypatch.setenv("GITHUB_TOKEN", "token")
+    result = runner.invoke(cli.app, ["compare", "amayyas", "rival", "--dry-run"])
+
+    assert result.exit_code == 0
+    assert "Prompt that would be sent" in plain(result.output)
+    assert "fix: it works now" in plain(result.output)
+    assert "wip please ignore" in plain(result.output)
+
+
+def test_compare_dry_run_never_calls_the_llm(
+    monkeypatch: pytest.MonkeyPatch, canned_compare_github: None
+) -> None:
+    monkeypatch.setenv("GITHUB_TOKEN", "token")
+
+    def _explode(*args: object, **kwargs: object) -> str:
+        raise AssertionError("--dry-run must not reach the LLM")
+
+    monkeypatch.setattr(cli, "generate_verdict", _explode)
+
+    result = runner.invoke(cli.app, ["compare", "amayyas", "rival", "--dry-run"])
+    assert result.exit_code == 0
+
+
+def test_compare_dry_run_markdown_prints_the_prompt(
+    monkeypatch: pytest.MonkeyPatch, canned_compare_github: None
+) -> None:
+    monkeypatch.setenv("GITHUB_TOKEN", "token")
+    result = runner.invoke(
+        cli.app, ["compare", "amayyas", "rival", "--dry-run", "-f", "markdown"]
+    )
+    output = plain(result.stdout)
+
+    assert result.exit_code == 0
+    assert "## Prompt that would be sent" in output
+    assert "fix: it works now" in output
+    assert "wip please ignore" in output
+
+
+def test_compare_llm_failure_exits_non_zero(
+    monkeypatch: pytest.MonkeyPatch, canned_compare_github: None
+) -> None:
+    monkeypatch.setenv("GITHUB_TOKEN", "token")
+    monkeypatch.setenv("LLM_API_KEY", "key")
+
+    def _raise(*args: object, **kwargs: object) -> str:
+        raise RateLimitError("Quota gone.")
+
+    monkeypatch.setattr(cli, "generate_verdict", _raise)
+    result = runner.invoke(cli.app, ["compare", "amayyas", "rival"])
+
+    assert result.exit_code == 1
+    assert "Quota gone." in plain(result.output)
+
+
+def test_compare_renders_the_verdict(
+    monkeypatch: pytest.MonkeyPatch, canned_compare_github: None
+) -> None:
+    monkeypatch.setenv("GITHUB_TOKEN", "token")
+    monkeypatch.setenv("LLM_API_KEY", "key")
+    monkeypatch.setattr(cli, "generate_verdict", lambda *a, **k: "amayyas wins.")
+
+    result = runner.invoke(cli.app, ["compare", "amayyas", "rival"])
+
+    assert result.exit_code == 0
+    assert "amayyas wins." in plain(result.output)
+    assert "@amayyas vs @rival" in plain(result.output)
+
+
+def test_compare_evidence_table_shows_both_users(
+    monkeypatch: pytest.MonkeyPatch, canned_compare_github: None
+) -> None:
+    monkeypatch.setenv("GITHUB_TOKEN", "token")
+    monkeypatch.setenv("LLM_API_KEY", "key")
+    monkeypatch.setattr(cli, "generate_verdict", lambda *a, **k: "verdict")
+
+    result = runner.invoke(cli.app, ["compare", "amayyas", "rival"])
+    output = plain(result.output)
+
+    assert "@amayyas" in output
+    assert "@rival" in output
+
+
+def test_compare_evidence_table_can_be_switched_off(
+    monkeypatch: pytest.MonkeyPatch, canned_compare_github: None
+) -> None:
+    monkeypatch.setenv("GITHUB_TOKEN", "token")
+    monkeypatch.setenv("LLM_API_KEY", "key")
+    monkeypatch.setattr(cli, "generate_verdict", lambda *a, **k: "verdict")
+
+    result = runner.invoke(cli.app, ["compare", "amayyas", "rival", "--no-evidence"])
+
+    assert "Repos owned" not in plain(result.output)
+
+
+def test_compare_json_dry_run_is_a_valid_document(
+    monkeypatch: pytest.MonkeyPatch,
+    canned_compare_github: None,
+    stats: ProfileStats,
+    other_stats: ProfileStats,
+) -> None:
+    monkeypatch.setenv("GITHUB_TOKEN", "token")
+    result = runner.invoke(
+        cli.app, ["compare", "amayyas", "rival", "--dry-run", "-f", "json"]
+    )
+    payload = json.loads(result.stdout)
+
+    assert result.exit_code == 0
+    assert payload["a"]["login"] == stats.login
+    assert payload["b"]["login"] == other_stats.login
+    assert payload["prompt"]["system"]
+
+
+def test_compare_json_verdict_carries_both_profiles(
+    monkeypatch: pytest.MonkeyPatch, canned_compare_github: None
+) -> None:
+    monkeypatch.setenv("GITHUB_TOKEN", "token")
+    monkeypatch.setenv("LLM_API_KEY", "key")
+    monkeypatch.setattr(cli, "generate_verdict", lambda *a, **k: "amayyas wins.")
+
+    result = runner.invoke(cli.app, ["compare", "amayyas", "rival", "-f", "json"])
+    payload = json.loads(result.stdout)
+
+    assert payload["verdict"] == "amayyas wins."
+    assert payload["a"]["login"] == "amayyas"
+    assert payload["b"]["login"] == "rival"
+
+
+def test_compare_markdown_renders_both_profiles_and_the_verdict(
+    monkeypatch: pytest.MonkeyPatch, canned_compare_github: None
+) -> None:
+    monkeypatch.setenv("GITHUB_TOKEN", "token")
+    monkeypatch.setenv("LLM_API_KEY", "key")
+    monkeypatch.setattr(cli, "generate_verdict", lambda *a, **k: "amayyas wins.")
+
+    result = runner.invoke(cli.app, ["compare", "amayyas", "rival", "-f", "markdown"])
+    output = plain(result.stdout)
+
+    assert "| Metric | @amayyas | @rival |" in output
+    assert "## Verdict: @amayyas vs @rival" in output
+    assert "amayyas wins." in output
+
+
+def test_a_github_failure_for_the_second_user_fails_cleanly(
+    monkeypatch: pytest.MonkeyPatch, stats: ProfileStats
+) -> None:
+    """The first fetch can succeed and the second still fail cleanly -- no
+    raw exception, no partial JSON on stdout."""
+    monkeypatch.setenv("GITHUB_TOKEN", "token")
+
+    def _gather(
+        token: str, username: str | None = None, **kwargs: object
+    ) -> ProfileStats:
+        if username == "rival":
+            raise UserNotFoundError("GitHub has no user named 'rival'.")
+        return stats
+
+    monkeypatch.setattr(cli, "gather_stats", _gather)
+    result = runner.invoke(cli.app, ["compare", "amayyas", "rival", "--dry-run"])
+
+    assert result.exit_code == 1
+    assert result.stdout == ""
+    assert "no user named 'rival'" in plain(result.stderr)

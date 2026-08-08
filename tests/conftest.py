@@ -188,6 +188,26 @@ def stats() -> ProfileStats:
     )
 
 
+@pytest.fixture
+def other_stats() -> ProfileStats:
+    """A second, distinct profile -- for compare, two of the same `stats` fixture
+    would not exercise anything a single profile could not already cover."""
+    return ProfileStats(
+        login="rival",
+        name="Rival Dev",
+        account_created=NOW - timedelta(days=1500),
+        total_owned=20,
+        originals=18,
+        forks=2,
+        total_stars=900,
+        languages=[("Go", 10), ("Rust", 8)],
+        abandoned=6,
+        no_description=3,
+        no_language=1,
+        commit_samples=[CommitSample(repo="other-repo", message="wip please ignore")],
+    )
+
+
 @pytest.fixture(autouse=True)
 def _no_network(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     """Last line of defence: fail loudly if a test ever opens a real socket."""

@@ -44,23 +44,27 @@ repo-roast roast                        # roast yourself (the authenticated user
 repo-roast roast torvalds               # roast someone else
 repo-roast roast torvalds --spice hot   # roast them harder
 repo-roast roast torvalds --dry-run     # evidence + the exact prompt, no LLM call
+repo-roast compare torvalds gvanrossum  # roast battle: two profiles, one verdict
 repo-roast --help                       # the commands
 repo-roast roast --help                 # the flags below
 ```
 
 > **Breaking change in 0.2.0.** The tool now takes a sub-command: `repo-roast
-> torvalds` became `repo-roast roast torvalds`. This makes room for the commands
-> that follow — `compare`, `repo` — without `compare` being ambiguous with a user
-> who happens to be called *compare*. The old form prints the new one rather than
-> a bare "No such command".
+> torvalds` became `repo-roast roast torvalds`. This made room for `compare`
+> below (and `repo`, still to come) without `compare` being ambiguous with a
+> user who happens to be called *compare*. The old form prints the new one
+> rather than a bare "No such command".
 
 ### Flags
 
-Flags belong to `roast`. `--version` belongs to the top level.
+`roast` and `compare` share every flag below. `compare` takes two usernames
+instead of one, both required — there is no "compare yourself" default.
+`--version` belongs to the top level (`repo-roast --version`).
 
 | Flag | Default | Meaning |
 | --- | --- | --- |
-| `username` (positional) | authenticated user | Which GitHub user to roast. |
+| `username` (positional, `roast`) | authenticated user | Which GitHub user to roast. |
+| `username_a` / `username_b` (positional, `compare`) | — | The two GitHub users to pit against each other. |
 | `--spice` / `-s` | `medium` | `mild`, `medium`, or `hot`. |
 | `--model` / `-m` | `$LLM_MODEL` or `llama-3.3-70b-versatile` | Model name to send to the provider. |
 | `--repos` / `-r` | `5` | How many recently-pushed repos to sample commit messages from. |
@@ -79,14 +83,15 @@ Flags belong to `roast`. `--version` belongs to the top level.
 ```bash
 repo-roast roast torvalds -f json | jq '.stats.total_stars'
 repo-roast roast torvalds -f json --dry-run | jq -r '.prompt.user'
+repo-roast compare torvalds gvanrossum -f json | jq -r '.verdict'
 ```
 
 Progress spinners and error messages go to **stderr**, so a pipe receives either
 a valid document or nothing at all — never half of one. Failures still exit
 non-zero, with the message on stderr where it belongs.
 
-`--format markdown` prints the evidence table and the roast as Markdown, ready to
-paste into an issue or a README.
+`--format markdown` prints the evidence table(s) and the roast or verdict as
+Markdown, ready to paste into an issue or a README.
 
 ## Provider
 
