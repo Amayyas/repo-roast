@@ -9,8 +9,13 @@ from typer.testing import CliRunner
 
 import repo_roast
 from repo_roast import cli
-from repo_roast.errors import RateLimitError, UserNotFoundError
-from repo_roast.stats import ProfileStats
+from repo_roast.errors import (
+    InvalidRepoNameError,
+    RateLimitError,
+    RepoNotFoundError,
+    UserNotFoundError,
+)
+from repo_roast.stats import ProfileStats, RepoStats
 
 from .conftest import plain
 
@@ -499,3 +504,178 @@ def test_a_github_failure_for_the_second_user_fails_cleanly(
     assert result.exit_code == 1
     assert result.stdout == ""
     assert "no user named 'rival'" in plain(result.stderr)
+
+
+# --- repo roast --------------------------------------------------------------
+
+
+@pytest.fixture
+def canned_repo_github(monkeypatch: pytest.MonkeyPatch, repo_stats: RepoStats) -> None:
+    monkeypatch.setattr(cli, "gather_repo_stats", lambda *a, **k: repo_stats)
+
+
+def test_repo_help_lists_its_flags() -> None:
+    result = runner.invoke(cli.app, ["repo", "--help"])
+
+    assert result.exit_code == 0
+    assert "--dry-run" in plain(result.output)
+
+
+def test_repo_dry_run_needs_no_llm_key(
+    monkeypatch: pytest.MonkeyPatch, canned_repo_github: None, repo_stats: RepoStats
+) -> None:
+    monkeypatch.setenv("GITHUB_TOKEN", "token")
+    result = runner.invoke(cli.app, ["repo", "amayyas/repo-roast", "--dry-run"])
+
+    assert result.exit_code == 0
+    assert "Prompt that would be sent" in plain(result.output)
+    assert "fix: it works now" in plain(result.output)
+
+
+def test_repo_dry_run_never_calls_the_llm(
+    monkeypatch: pytest.MonkeyPatch, canned_repo_github: None
+) -> None:
+    monkeypatch.setenv("GITHUB_TOKEN", "token")
+
+    def _explode(*args: object, **kwargs: object) -> str:
+        raise AssertionError("--dry-run must not reach the LLM")
+
+    monkeypatch.setattr(cli, "generate_repo_roast", _explode)
+
+    result = runner.invoke(cli.app, ["repo", "amayyas/repo-roast", "--dry-run"])
+    assert result.exit_code == 0
+
+
+def test_repo_dry_run_markdown_prints_the_prompt(
+    monkeypatch: pytest.MonkeyPatch, canned_repo_github: None
+) -> None:
+    monkeypatch.setenv("GITHUB_TOKEN", "token")
+    result = runner.invoke(
+        cli.app, ["repo", "amayyas/repo-roast", "--dry-run", "-f", "markdown"]
+    )
+    output = plain(result.stdout)
+
+    assert result.exit_code == 0
+    assert "## Prompt that would be sent" in output
+    assert "fix: it works now" in output
+
+
+def test_repo_roast_is_rendered(
+    monkeypatch: pytest.MonkeyPatch, canned_repo_github: None
+) -> None:
+    monkeypatch.setenv("GITHUB_TOKEN", "token")
+    monkeypatch.setenv("LLM_API_KEY", "key")
+    monkeypatch.setattr(
+        cli, "generate_repo_roast", lambda *a, **k: "this repo is a mess."
+    )
+
+    result = runner.invoke(cli.app, ["repo", "amayyas/repo-roast"])
+
+    assert result.exit_code == 0
+    assert "this repo is a mess." in plain(result.output)
+    assert "amayyas/repo-roast" in plain(result.output)
+
+
+def test_repo_evidence_table_can_be_switched_off(
+    monkeypatch: pytest.MonkeyPatch, canned_repo_github: None
+) -> None:
+    monkeypatch.setenv("GITHUB_TOKEN", "token")
+    monkeypatch.setenv("LLM_API_KEY", "key")
+    monkeypatch.setattr(cli, "generate_repo_roast", lambda *a, **k: "roasted")
+
+    result = runner.invoke(cli.app, ["repo", "amayyas/repo-roast", "--no-evidence"])
+
+    assert "Evidence against" not in plain(result.output)
+
+
+def test_repo_json_dry_run_is_a_valid_document(
+    monkeypatch: pytest.MonkeyPatch, canned_repo_github: None, repo_stats: RepoStats
+) -> None:
+    monkeypatch.setenv("GITHUB_TOKEN", "token")
+    result = runner.invoke(
+        cli.app, ["repo", "amayyas/repo-roast", "--dry-run", "-f", "json"]
+    )
+    payload = json.loads(result.stdout)
+
+    assert result.exit_code == 0
+    assert payload["repo"]["full_name"] == repo_stats.full_name
+    assert payload["prompt"]["system"]
+
+
+def test_repo_json_roast_carries_the_stats_and_the_roast(
+    monkeypatch: pytest.MonkeyPatch, canned_repo_github: None
+) -> None:
+    monkeypatch.setenv("GITHUB_TOKEN", "token")
+    monkeypatch.setenv("LLM_API_KEY", "key")
+    monkeypatch.setattr(
+        cli, "generate_repo_roast", lambda *a, **k: "this repo is a mess."
+    )
+
+    result = runner.invoke(cli.app, ["repo", "amayyas/repo-roast", "-f", "json"])
+    payload = json.loads(result.stdout)
+
+    assert payload["roast"] == "this repo is a mess."
+    assert payload["repo"]["full_name"] == "amayyas/repo-roast"
+
+
+def test_repo_markdown_renders_evidence_and_the_roast(
+    monkeypatch: pytest.MonkeyPatch, canned_repo_github: None
+) -> None:
+    monkeypatch.setenv("GITHUB_TOKEN", "token")
+    monkeypatch.setenv("LLM_API_KEY", "key")
+    monkeypatch.setattr(
+        cli, "generate_repo_roast", lambda *a, **k: "this repo is a mess."
+    )
+
+    result = runner.invoke(cli.app, ["repo", "amayyas/repo-roast", "-f", "markdown"])
+    output = plain(result.stdout)
+
+    assert "| Metric | Value |" in output
+    assert "## Roast of amayyas/repo-roast" in output
+    assert "this repo is a mess." in output
+
+
+def test_an_invalid_repo_name_fails_cleanly(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No PyGithub call is even attempted for a malformed identifier."""
+    monkeypatch.setenv("GITHUB_TOKEN", "token")
+
+    def _raise(*args: object, **kwargs: object) -> RepoStats:
+        raise InvalidRepoNameError(
+            "'torvalds' is not a valid repository identifier.",
+            hint="Use the form owner/name, e.g. torvalds/linux.",
+        )
+
+    monkeypatch.setattr(cli, "gather_repo_stats", _raise)
+    result = runner.invoke(cli.app, ["repo", "torvalds", "--dry-run"])
+
+    assert result.exit_code == 1
+    assert "not a valid repository identifier" in plain(result.output)
+
+
+def test_a_missing_repo_fails_cleanly(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GITHUB_TOKEN", "token")
+
+    def _raise(*args: object, **kwargs: object) -> RepoStats:
+        raise RepoNotFoundError("GitHub has no repository named 'a/ghost'.")
+
+    monkeypatch.setattr(cli, "gather_repo_stats", _raise)
+    result = runner.invoke(cli.app, ["repo", "a/ghost", "--dry-run"])
+
+    assert result.exit_code == 1
+    assert "no repository named 'a/ghost'" in plain(result.output)
+
+
+def test_repo_llm_failure_exits_non_zero(
+    monkeypatch: pytest.MonkeyPatch, canned_repo_github: None
+) -> None:
+    monkeypatch.setenv("GITHUB_TOKEN", "token")
+    monkeypatch.setenv("LLM_API_KEY", "key")
+
+    def _raise(*args: object, **kwargs: object) -> str:
+        raise RateLimitError("Quota gone.")
+
+    monkeypatch.setattr(cli, "generate_repo_roast", _raise)
+    result = runner.invoke(cli.app, ["repo", "amayyas/repo-roast"])
+
+    assert result.exit_code == 1
+    assert "Quota gone." in plain(result.output)
